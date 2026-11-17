@@ -1,6 +1,6 @@
 # LongitudinalLVM
 
-`LongitudinalLVM` fits longitudinal latent variable models for ordinal and binary responses using a probit link. It supports longitudinal confirmatory factor analysis (CFA) and second-order latent growth models. Estimation uses full-information maximum likelihood (FIML), with several numerical integration methods.
+`LongitudinalLVM` fits longitudinal latent variable models for ordinal responses using a probit link. It supports longitudinal confirmatory factor analysis (CFA) and second-order latent growth models. Estimation uses full-information maximum likelihood (FIML), with several numerical integration methods.
 
 ## Installation
 
