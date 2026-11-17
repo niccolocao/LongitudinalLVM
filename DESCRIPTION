@@ -1,7 +1,7 @@
-Package: longProbitLVM
+Package: LongitudinalLVM
 Type: Package
 Title: Full Information Probit Models for Longitudinal Ordinal Data
-Version: 0.4.0
+Version: 0.4.1
 Authors@R: c(
     person("Niccolò", "Cao", role = "aut"),
     person("Lorenzo", "Carvisiglia", role = c("ctb", "cre"),

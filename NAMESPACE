@@ -1,4 +1,4 @@
-useDynLib(longProbitLVM, .registration = TRUE, .fixes = "native_")
+useDynLib(LongitudinalLVM, .registration = TRUE, .fixes = "native_")
 importFrom(stats, logLik, median, nobs, optim, optimHess, pchisq, plogis, pnorm, qlogis, qnorm, setNames)
 importFrom(utils, flush.console, head, tail)
 export(cfa_long_fit_md, cfa_long_fit_wu2016, measurement_invariance_wu2016, integration_info)

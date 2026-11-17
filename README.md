@@ -1,6 +1,6 @@
 # LongitudinalLVM
 
-The R package `longProbitLVM` fits longitudinal ordinal probit models by full information maximum likelihood (FIML). Supply one row per subject and occasion, with `NA` for missing responses. Items can be integer coded from 0 or 1, or stored as ordered factors.
+The R package `LongitudinalLVM` fits longitudinal ordinal probit models by full information maximum likelihood (FIML). Supply one row per subject and occasion, with `NA` for missing responses. Items can be integer coded from 0 or 1, or stored as ordered factors.
 
 ## Installation
 
@@ -11,7 +11,7 @@ Install from GitHub with `remotes::install_github("niccolocao/LongitudinalLVM")`
 Use `growth_tt_fit_flexible()` with `simple_growth = FALSE` and design matrices `X` and `Z`. Their columns define the fixed and random coefficients. Common designs have one row per occasion, in sorted occasion order. The function also accepts subject-specific designs and separate designs by factor. The following example fits a quadratic trajectory.
 
 ```r
-library(longProbitLVM)
+library(LongitudinalLVM)
 
 s <- sort(unique(dat$measurecount))
 s <- s - s[1L]

@@ -38,7 +38,7 @@ static const R_CMethodDef methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
-void attribute_visible R_init_longProbitLVM(DllInfo *dll)
+void attribute_visible R_init_LongitudinalLVM(DllInfo *dll)
 {
     R_registerRoutines(dll, methods, NULL, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);

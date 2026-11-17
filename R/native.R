@@ -1,10 +1,10 @@
 native_symbol <- function(name) {
-  get(paste0("native_", name), envir = asNamespace("longProbitLVM"),
+  get(paste0("native_", name), envir = asNamespace("LongitudinalLVM"),
       inherits = FALSE)
 }
 
 native_has <- function(name) {
-  exists(paste0("native_", name), envir = asNamespace("longProbitLVM"),
+  exists(paste0("native_", name), envir = asNamespace("LongitudinalLVM"),
          inherits = FALSE)
 }
 

@@ -1,4 +1,4 @@
-library(longProbitLVM)
+library(LongitudinalLVM)
 
 set.seed(13)
 n <- 30L
