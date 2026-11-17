@@ -16,7 +16,8 @@ dat <- dat[sample.int(nrow(dat)), ]
 
 for (method in c("AGH_FULL_EQUIV", "AGH_RE_FULL_EQUIV")) {
   f <- growth_tt_fit(dat, items, methInteg = method, identification = "marker", marker_item = "a",
-                     nquadgh = 2L, maxiter = 3L, growth_shape = "rho", rho_fixed = 2)
+                     nquadgh = 2L, maxiter = 3L, growth_shape = "rho", rho_fixed = 2,
+                     debug_par = FALSE, profile = FALSE)
   stopifnot(is.finite(logLik(f)), isTRUE(f$structure$analytic_score))
 }
 
@@ -31,6 +32,7 @@ s <- 0:4
 XZ <- cbind(intercept = 1, time = s, quadratic = s^2)
 g <- growth_tt_fit_flexible(dat2, c("a","b"), simple_growth = FALSE,
                              X = XZ, Z = XZ, delta_free = FALSE,
-                             methInteg = "GH", nquadgh = 3L, maxiter = 3L)
+                             methInteg = "GH", nquadgh = 3L, maxiter = 3L,
+                             debug_par = FALSE, profile = FALSE)
 stopifnot(is.finite(logLik(g)), all(dim(g$decode$Sigma_u) == c(3L, 3L)),
           all(dim(g$decode$beta) == c(1L, 3L)), g$structure$growth$p_ran == 3L)

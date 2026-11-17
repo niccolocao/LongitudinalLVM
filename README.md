@@ -4,7 +4,7 @@ The R package `longProbitLVM` fits longitudinal ordinal probit models by full in
 
 ## Installation
 
-Run `R CMD INSTALL .` from the source directory. The package compiles C and Fortran code and links to the BLAS and LAPACK libraries used by R. Install `spacefillr` to use QMC.
+Install from GitHub with `remotes::install_github("niccolocao/LongitudinalLVM")`. From a local copy, install `fastGHQuad` and run `R CMD INSTALL .` in the source directory. The package compiles C and Fortran code and links to R's BLAS and LAPACK libraries. Install `spacefillr` to use QMC.
 
 ## General growth model
 
@@ -109,7 +109,7 @@ An empty product is one. The missingness mechanism is ignorable for likelihood i
 For joint integration on standard normal coordinates $z$, write
 $g_i(z)=\prod_{(k,t)\in O_i} p_{ikt}(y_{ikt}\mid z)$.
 
-Standard GH uses $\widehat L_i=\sum_j w_jg_i(z_j)$ with Gauss-Hermite nodes and weights for a standard normal integral. QMC uses $\widehat L_i=M^{-1}\sum_jg_i(\Phi^{-1}(v_j))$ with Owen-scrambled Sobol points $v_j$ and the inverse CDF applied coordinate-wise.
+Standard GH uses $\widehat L_i=\sum_j w_jg_i(z_j)$. The package generates the nodes and weights with `fastGHQuad::gaussHermiteData()` and scales the rule for a standard normal integral. QMC uses $\widehat L_i=M^{-1}\sum_jg_i(\Phi^{-1}(v_j))$ with Owen-scrambled Sobol points $v_j$ and the inverse CDF applied coordinate-wise.
 
 For joint AGH, let $z_{ij}^*=\hat z_i+C_i z_j$, with $C_iC_i^{\mathsf T}=H_i^{-1}$, where $H_i$ is the Hessian of the negative log integrand including the Gaussian density. Then
 
@@ -141,8 +141,12 @@ Let $T$ count occasions, $Q$ factors, $K$ included item random intercepts and $p
 | Two-tier AGH, full-equivalent | Outer $d$, then $K$ rules of dimension 1 | $d+K$ | $m^d$ outer, $m$ per item at each outer node |
 | `AGH_RE_NESTED` | Outer $b$, then $d$ occasion disturbances and $K$ rules of dimension 1 | $b$ | $m_u^b$ adaptive nodes, $m_\zeta^d$ fixed nodes per adaptive node, $m_a$ per item |
 | `AGH_RE_FULL_EQUIV` | Outer $b+d$, then $K$ rules of dimension 1 | $b+d+K$ | $m_u^b m_\zeta^d$ outer, $m_a$ per item at each outer node |
-| QMC | Joint $d+K$ or two-tier $d$ with $K$ rules of dimension 1 | None | $M$ joint or outer, with GH or QMC item rules for two-tier CFA |
+| QMC | Joint $d+K$ | None | $M$ Sobol points in $d+K$ dimensions |
 
-In `cfa_long_fit_md()`, select `methInteg = "GH"` or `"AGH"` with `two_tier = FALSE` for standard integration. With `two_tier = TRUE`, choose `two_tier_type = "node_specific"` or `"full_equiv"` for AGH. Growth GH and QMC use the two-tier layout. In the growth fitter, `"AGH"` selects node-specific adaptation and `"AGH_FULL_EQUIV"` selects the full-equivalent rule. The growth coefficient methods let you set `nquadgh_u`, `nquadgh_zeta` and `nquadgh_re` separately. Wu CFA uses a trajectory rule with $K=0$. `integration_info(fit)` reports the dimensions and counts for the fitted model.
+In `growth_tt_fit()` and `cfa_long_fit_md()`, select `two_tier = FALSE` with `methInteg = "GH"` or `"AGH"` for standard integration. QMC uses one joint rule with `two_tier = FALSE`. Use `two_tier = TRUE` for two-tier GH or AGH. In CFA, `two_tier_type` selects `"node_specific"` or `"full_equiv"` for two-tier AGH. In growth, `"AGH"` and `"AGH_FULL_EQUIV"` select those two rules when `two_tier = TRUE`. The growth coefficient methods let you set `nquadgh_u`, `nquadgh_zeta` and `nquadgh_re` separately. Wu CFA uses a trajectory rule with $K=0$. `integration_info(fit)` reports the dimensions and counts, including the dimension of the adaptive mode.
 
 The trajectory and growth coefficient representations use the same model likelihood. Their finite quadrature rules can give different numerical values. `growth_tt_individual_derivatives()` evaluates subject likelihood contributions and finite difference derivatives for GH, QMC and trajectory-based AGH. The analytic score is available for supported single factor, two random coefficient models with the original three-occasion `growth_shape = "rho"` specification. The fitter uses numerical derivatives for `rho_pattern`.
+
+## Reproducing the original growth fit
+
+For the original three-occasion fit with estimated scores $(0,1,\rho)$, use `growth_shape = "rho"`, `threshold_identification = "central_01"`, `methInteg = "AGH_FULL_EQUIV"` and `two_tier = TRUE`. Match the original quadrature order and the identification and covariate options. The quadrature uses the original node scaling, tensor order and weight products. Set `debug_par = FALSE` to suppress parameter diagnostics. The fitted object includes the data report, profiling summary and the original BIC based on the total number of subjects.

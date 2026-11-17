@@ -181,7 +181,9 @@ loglik_growth_tt_agh_full_equiv_i_vec <- function(b0,
                              delta_x_col0 = NULL,
                              delta_z_col0 = NULL,
                              subject_specific_design0 = NULL,
-                             prepared_design0 = FALSE) {
+                             prepared_design0 = FALSE,
+                             joint_rule0 = 0L,
+                             joint_grid0 = NULL) {
   if (is.null(loadmask0)) {
     loadmask0 <- matrix(1L, nrow = as.integer(nvar0), ncol = as.integer(Q0))
   }
@@ -200,7 +202,18 @@ loglik_growth_tt_agh_full_equiv_i_vec <- function(b0,
     weights_re0 <- 1
   }
 
-  native_call("loglik_growth_tt_agh_full_equiv_i_vec",
+  if (joint_rule0 != 2L) {
+    joint_grid0 <- list(modes = 0, roots = 0, logdet = 0)
+  } else {
+    dim_joint <- as.double(n0) * Q0 + nvar0 * re_item0
+    sizes <- c(modes = dim_joint * nsub0, roots = dim_joint^2 * nsub0, logdet = nsub0)
+    if (is.null(joint_grid0)) {
+      joint_grid0 <- lapply(sizes, double)
+    } else if (!all(lengths(joint_grid0[names(sizes)]) == sizes)) {
+      stop("The saved joint AGH grid does not match the fitted dimensions.", call. = FALSE)
+    }
+  }
+  out <- native_call("loglik_growth_tt_agh_full_equiv_i_vec",
      b0 = as.double(b0),
      Y0 = as.integer(Y0),
      nvar0 = as.integer(nvar0),
@@ -234,7 +247,17 @@ loglik_growth_tt_agh_full_equiv_i_vec <- function(b0,
      delta_mask0 = design0$delta_mask0,
      delta_x_col0 = design0$delta_x_col0,
      delta_z_col0 = design0$delta_z_col0,
-     loglik_i = double(as.integer(nsub0)))$loglik_i
+     joint_rule0 = as.integer(joint_rule0),
+     joint_modes0 = as.double(joint_grid0$modes),
+     joint_roots0 = as.double(joint_grid0$roots),
+     joint_logdet0 = as.double(joint_grid0$logdet),
+     loglik_i = double(as.integer(nsub0)))
+  result <- out$loglik_i
+  if (joint_rule0 == 2L && update_gh0 == 1L) {
+    attr(result, "joint_grid") <- list(type = "AGH_JOINT", modes = out$joint_modes0,
+                                      roots = out$joint_roots0, logdet = out$joint_logdet0)
+  }
+  result
 }
 
 build_growth_tt_c_inputs <- function(data,
@@ -548,7 +571,7 @@ growth_tt_individual_derivatives <- function(fit,
       if (is.null(fit$agh_grid)) {
         stop("fit$agh_grid mancante: la griglia AGH alla convergenza deve essere salvata nel fit.")
       }
-      growth_tt_set_agh_grid(fit$agh_grid)
+      if (!identical(fit$agh_grid$type, "AGH_JOINT")) growth_tt_set_agh_grid(fit$agh_grid)
     }
   } else {
     if (is.null(data) || is.null(namvar)) {
@@ -567,6 +590,7 @@ growth_tt_individual_derivatives <- function(fit,
     fit_id0_c <- next_fit_id()
   }
 
+  joint_rule <- if (is.null(ci$joint_rule_c)) 0L else ci$joint_rule_c
   if (ci$npm0_c != npm0) {
     stop("npm0 != length(fit$par_opt): ", ci$npm0_c, " vs ", npm0)
   }
@@ -612,7 +636,7 @@ growth_tt_individual_derivatives <- function(fit,
       )
     }
 
-    if (methInteg == "AGH") {
+    if (methInteg == "AGH" && joint_rule == 0L) {
       check_symbol("loglik_growth_tt_agh_i_vec")
       out <- loglik_growth_tt_agh_i_vec(
         par,
@@ -628,7 +652,7 @@ growth_tt_individual_derivatives <- function(fit,
         ci$delta_x_col0_c, ci$delta_z_col0_c,
         subject_specific_design0_ci, TRUE
       )
-    } else if (methInteg == "AGH_FULL_EQUIV") {
+    } else if (methInteg == "AGH_FULL_EQUIV" || joint_rule != 0L) {
       check_symbol("loglik_growth_tt_agh_full_equiv_i_vec")
       out <- loglik_growth_tt_agh_full_equiv_i_vec(
         par,
@@ -642,7 +666,8 @@ growth_tt_individual_derivatives <- function(fit,
         ci$Q0_c, ci$loadmask0_c,
         ci$p_fix0_c, ci$p_ran0_c, X0, Z0, ci$delta_mask0_c,
         ci$delta_x_col0_c, ci$delta_z_col0_c,
-        subject_specific_design0_ci, TRUE
+        subject_specific_design0_ci, TRUE,
+        joint_rule0 = joint_rule, joint_grid0 = fit$agh_grid
       )
     } else {
       check_symbol("loglik_growth_tt_i_vec")
@@ -677,7 +702,7 @@ growth_tt_individual_derivatives <- function(fit,
       cat("restore AGH grid saved at convergence; update_gh0 = 0 for derivatives\n")
     }
 
-    growth_tt_set_agh_grid(fit$agh_grid)
+    if (joint_rule == 0L) growth_tt_set_agh_grid(fit$agh_grid)
     loglik_i_refresh <- NULL
   }
 

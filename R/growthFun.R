@@ -1668,12 +1668,12 @@ growth_tt_fit_flexible <- function(data,
                                    compute_hessian = FALSE,
                                     hessian_method = NULL,
                                     hess_eps = 1e-4,
-                                   profile = FALSE,
-                                   profile_print = FALSE,
+                                   profile = TRUE,
+                                   profile_print = TRUE,
                                    parscale = NULL,
-                                   debug_par = FALSE,
-                                   debug_par_each_eval = FALSE,
-                                   debug_par_full = FALSE,
+                                   debug_par = TRUE,
+                                   debug_par_each_eval = TRUE,
+                                   debug_par_full = TRUE,
                                    debug_par_max_eval = Inf,
                                    tol_loglik = 1e-7,
                                    tol_par = 1e-3,
@@ -1682,7 +1682,8 @@ growth_tt_fit_flexible <- function(data,
                                    nquadgh_u = nquadgh,
                                    nquadgh_zeta = nquadgh,
                                    nquadgh_re = nquadgh,
-                                   rho_pattern = NULL) {
+                                   rho_pattern = NULL,
+                                   two_tier = NULL) {
   identification <- match.arg(identification)
   threshold_identification <- match.arg(threshold_identification)
   if (missing(growth_shape) && (!is.null(rho_pattern) ||
@@ -1695,6 +1696,16 @@ growth_tt_fit_flexible <- function(data,
     methInteg <- sub("^RE_AGH_", "AGH_RE_", methInteg)
   }
   methInteg <- match.arg(methInteg)
+  if (is.null(two_tier)) two_tier <- methInteg != "QMC"
+  two_tier <- check_flag(two_tier, "two_tier")
+  if (methInteg == "QMC" && two_tier) {
+    stop("QMC requires two_tier = FALSE.", call. = FALSE)
+  }
+  if (!two_tier && methInteg %in% c("AGH_RE_NESTED", "AGH_RE_FULL_EQUIV")) {
+    stop("The growth coefficient rules require two_tier = TRUE.", call. = FALSE)
+  }
+  if (!two_tier && methInteg == "AGH_FULL_EQUIV") methInteg <- "AGH"
+  joint_rule <- if (two_tier) 0L else if (methInteg == "AGH") 2L else 1L
   maxiter <- check_count(maxiter, "maxiter", 0L)
   if (!is.null(update_gh)) update_gh <- check_count(update_gh, "update_gh", 0L)
   if (missing(simple_growth) && (!is.null(X) || !is.null(Z))) simple_growth <- FALSE
@@ -1717,6 +1728,9 @@ growth_tt_fit_flexible <- function(data,
     )
 
 compute_hessian <- hessian_method != "none"
+  if (joint_rule != 0L && hessian_method == "analytic_fixed") {
+    hessian_method <- "numeric_fixed"
+  }
 
   if (length(analytic_score) != 1L || is.na(analytic_score)) {
     stop("analytic_score deve essere TRUE/FALSE.")
@@ -1745,6 +1759,10 @@ compute_hessian <- hessian_method != "none"
     completed_rows = 0L,
     subject_covariates = unique(c(intercept_covariates, slope_covariates))
   )
+  if (isTRUE(verbose)) {
+    cat("data check: rows =", nrow(data), "subjects =", data_report$nsub,
+        "no structural rows added\n")
+  }
   loadmask <- loading_mask(namvar, Q, simple, loadmask)
   Q <- ncol(loadmask)
   if (is.null(factor_names)) factor_names <- colnames(loadmask)
@@ -1860,6 +1878,7 @@ compute_hessian <- hessian_method != "none"
     x_slope_col[columns] <- 1L
   }
   dim_eta <- n * Q
+  dim_joint <- dim_eta + if (isTRUE(re_item)) nvar else 0L
   dim_u <- Q * p_ran
   dim_zeta <- n * Q
   use_analytic_score_opt <- isTRUE(analytic_score) &&
@@ -1877,16 +1896,18 @@ compute_hessian <- hessian_method != "none"
   nitem0 <- as.integer(packed$time)
   nobs <- length(Y0)
 
+  empty_rule <- list(nquad = 1L, nodes = 0, weights = 1)
   if (is_growth_re_agh) {
     u_rule <- make_gh_tensor(dim_u, nquadgh_u)
     zeta_rule <- make_gh_tensor(dim_zeta, nquadgh_zeta)
     eta_rule <- zeta_rule
   } else {
-    eta_rule <- if (methInteg == "QMC") make_qmc(dim_eta, nquadqmc) else make_gh_tensor(dim_eta, nquadgh)
+    rule_dimension <- if (two_tier) dim_eta else dim_joint
+    eta_rule <- if (methInteg == "QMC") make_qmc(rule_dimension, nquadqmc) else make_gh_tensor(rule_dimension, nquadgh)
     u_rule <- list(nquad = 1L, nodes = rep(0, dim_u), weights = 1)
     zeta_rule <- list(nquad = 1L, nodes = rep(0, dim_zeta), weights = 1)
   }
-  re_rule <- if (isTRUE(re_item)) make_gh_1d(nquadgh_re) else list(nquad = 1L, nodes = 0, weights = 1)
+  re_rule <- if (two_tier && isTRUE(re_item)) make_gh_1d(nquadgh_re) else empty_rule
 
   ref_item <- vapply(seq_len(Q), function(q) tail(which(loadmask[, q] == 1L), 1L), integer(1L))
   dep0 <- gamma_dep[, 1L]
@@ -2253,6 +2274,7 @@ compute_hessian <- hessian_method != "none"
   nquad_u0_c <- as.integer(u_rule$nquad); nodes_u0_c <- as.double(u_rule$nodes); weights_u0_c <- as.double(u_rule$weights)
   nquad_zeta0_c <- as.integer(zeta_rule$nquad); nodes_zeta0_c <- as.double(zeta_rule$nodes); weights_zeta0_c <- as.double(zeta_rule$weights)
   nquad_re0_c <- as.integer(re_rule$nquad); nodes_re0_c <- as.double(re_rule$nodes); weights_re0_c <- as.double(re_rule$weights)
+  joint_grid <- NULL
 
   loglik_call <- function(par, update_grid = 1L) {
     if (!is.null(rho_spec)) {
@@ -2265,7 +2287,19 @@ compute_hessian <- hessian_method != "none"
     .growth_set_fortran_options(identification, threshold_identification, growth_shape,
                                 intercept_mask, gamma_dep, x_slope_col, nvar, n, Q, p_fix,
                                 rho_fixed = rho_fixed_vec, marker_index = marker_index, zero_time = zero_time)
-    if (methInteg == "AGH") {
+    if (joint_rule != 0L) {
+      contributions <- loglik_growth_tt_agh_full_equiv_i_vec(
+        par, Y0_c, nvar0_c, nsub0_c, nobs0_c, n0_c, nmes0_c, c0_c, cm10_c, ntre0_c,
+        nquad_eta0_c, nodes_eta0_c, weights_eta0_c, nquad_re0_c, nodes_re0_c, weights_re0_c,
+        nitem0_c, npm0_c, re_item0, theta_time0, delta_free0, monotone_tau0,
+        as.integer(update_grid), fit_id0_c, Q0_c, loadmask0_c, p_fix0_c, p_ran0_c,
+        X0_c, Z0_c, delta_mask0_c, dx_c, dz_c, design$subject_specific_design, TRUE,
+        joint_rule0 = joint_rule, joint_grid0 = joint_grid
+      )
+      if (any(!is.finite(contributions) | contributions <= -1e8)) return(1e9)
+      if (joint_rule == 2L && update_grid == 1L) joint_grid <<- attr(contributions, "joint_grid")
+      -sum(contributions)
+    } else if (methInteg == "AGH") {
       loglik_growth_tt_agh(par,Y0_c,nvar0_c,nsub0_c,nobs0_c,n0_c,nmes0_c,c0_c,cm10_c,ntre0_c,
                            nquad_eta0_c,nodes_eta0_c,weights_eta0_c,nquad_re0_c,nodes_re0_c,weights_re0_c,
                            nitem0_c,npm0_c,re_item0,theta_time0,delta_free0,monotone_tau0,
@@ -2783,7 +2817,9 @@ if (is_agh) {
 
   opt$value <- val_final_refresh
 
-  if (methInteg == "AGH") {
+  if (joint_rule == 2L) {
+    agh_grid <- joint_grid
+  } else if (methInteg == "AGH") {
 
     agh_grid <- growth_tt_get_agh_grid()
 
@@ -3090,14 +3126,19 @@ if (hessian_method == "analytic_fixed" &&
       cat("n:", n, "\n")
       cat("Q:", Q, "\n")
       cat("dim_eta:", dim_eta, "\n")
-      cat("nquad_eta:", eta_rule$nquad, "\n")
+      if (two_tier) {
+        cat("nquad_eta:", eta_rule$nquad, "\n")
+      } else {
+        cat("dim_joint:", dim_joint, "\n")
+        cat("nquad_joint:", eta_rule$nquad, "\n")
+      }
       if (is_growth_re_agh) {
         cat("dim_u:", dim_u, "\n")
         cat("nquad_u:", u_rule$nquad, "\n")
         cat("dim_zeta:", dim_zeta, "\n")
         cat("nquad_zeta:", zeta_rule$nquad, "\n")
       }
-      cat("nquad_re:", re_rule$nquad, "\n")
+      if (two_tier) cat("nquad_re:", re_rule$nquad, "\n")
       cat("nfn_total:", profile_info$nfn_total, "\n")
       cat("nfn_opt:", profile_info$nfn_opt, "\n")
       cat("nfn_hess:", profile_info$nfn_hess, "\n")
@@ -3304,6 +3345,7 @@ if (hessian_method == "analytic_fixed" &&
                    subject_specific_design0_c=as.integer(design$subject_specific_design),
                    IDs=IDs,namvar=namvar,occ=occ,ID=ID,methInteg=methInteg,
                    analytic_score=as.integer(use_analytic_score_opt),rho_spec=rho_spec,
+                   joint_rule_c=joint_rule,
                    dims=list(nsub=nsub,nvar=nvar,n=n,Q=Q,dim_eta=dim_eta,dim_u=dim_u,dim_zeta=dim_zeta,
                              p_fix=p_fix,p_ran=p_ran,npm0=npm0),
                    growth_options=list(identification=identification,threshold_identification=threshold_identification,
@@ -3320,6 +3362,7 @@ if (hessian_method == "analytic_fixed" &&
 
   new_long_fit(list(
     conv=opt$convergence,convergence=opt$convergence,message=opt$message,loglik=-opt$value,negloglik=opt$value,
+    BIC=2 * opt$value + length(par_opt) * log(nsub),
     fit_id0_c=fit_id0_c,c_inputs=c_inputs,agh_grid=agh_grid,
     timing=timing,parscale=ps0,
     par_opt=par_opt,par=par_nat,par_natural=par_natural,
@@ -3340,7 +3383,7 @@ if (hessian_method == "analytic_fixed" &&
       zero_anchor=occ_vals[zero_time],
       loadmask=loadmask,methInteg=methInteg,
       analytic_score=isTRUE(use_analytic_score_opt),
-      re_item=re_item0,two_tier=TRUE,theta_time=theta_time0,
+      re_item=re_item0,two_tier=two_tier,theta_time=theta_time0,hessian_method=hessian_method,
       delta_free=delta_free0,rho_fixed=rho_fixed_vec,monotone_tau=monotone_tau0,
       growth=list(
         type=if(isTRUE(simple_growth)) "simple_random_intercept_slope" else "general_XZ_growth",
@@ -3350,10 +3393,11 @@ if (hessian_method == "analytic_fixed" &&
         time_scores=design$time,delta_mask=design$delta_mask,dimU=dim_u,factor_names=factor_names,
         intercept_covariates=intercept_covariates,slope_covariates=slope_covariates
       ),
-      integration_target=if(is_growth_re_agh) "growth_random_effects" else "eta",
-      nquad=NULL,nquad_eta=nquad_eta0_c,nquad_u=if(is_growth_re_agh)nquad_u0_c else NULL,
-      nquad_zeta=if(is_growth_re_agh)nquad_zeta0_c else NULL,nquad_re=nquad_re0_c,
-      dimInt=NULL,dim_eta_int=dim_eta,dim_u_int=if(is_growth_re_agh)dim_u else NULL,
+      integration_target=if(!two_tier) "joint" else if(is_growth_re_agh) "growth_random_effects" else "eta",
+      nquad=if(!two_tier)nquad_eta0_c else NULL,nquad_eta=if(two_tier)nquad_eta0_c else NULL,
+      nquad_u=if(is_growth_re_agh)nquad_u0_c else NULL,
+      nquad_zeta=if(is_growth_re_agh)nquad_zeta0_c else NULL,nquad_re=if(two_tier)nquad_re0_c else NULL,
+      dimInt=if(!two_tier)dim_joint else NULL,dim_eta_int=dim_eta,dim_u_int=if(is_growth_re_agh)dim_u else NULL,
       dim_zeta_int=if(is_growth_re_agh)dim_zeta else NULL,
       data_report=data_report
     ),

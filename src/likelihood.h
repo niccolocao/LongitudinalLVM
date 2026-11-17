@@ -66,7 +66,8 @@ void loglik_growth_tt_agh_full_equiv_i_vec(
     double *, int *, int *, int *, int *, int *, int *, int *, int *,
     int *, int *, double *, double *, int *, double *, double *, int *, int *,
     int *, int *, int *, int *, int *, int *, int *, int *, int *,
-    int *, double *, double *, double *, int *, int *, double *);
+    int *, double *, double *, double *, int *, int *, int *,
+    double *, double *, double *, double *);
 void loglik_growth_re_tt_agh_nested(
     double *, int *, int *, int *, int *, int *, int *, int *, int *,
     int *, int *, double *, double *, int *, double *, double *, int *, double *,

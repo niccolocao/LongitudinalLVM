@@ -15,13 +15,8 @@ check_flag <- function(x, name) {
 
 make_gh_1d <- function(nquadgh) {
   n <- check_count(nquadgh, "nquadgh")
-  j <- seq_len(n - 1L)
-  jacobi <- matrix(0, n, n)
-  jacobi[cbind(j, j + 1L)] <- jacobi[cbind(j + 1L, j)] <- sqrt(j)
-  rule <- eigen(jacobi, symmetric = TRUE)
-  order <- seq.int(n, 1L)
-  weights <- rule$vectors[1L, order]^2
-  list(nquad = n, nodes = rule$values[order], weights = weights / sum(weights))
+  rule <- fastGHQuad::gaussHermiteData(n)
+  list(nquad = n, nodes = rule$x * sqrt(2), weights = rule$w / sqrt(pi))
 }
 
 make_gh_tensor <- function(dim, nquadgh) {
@@ -34,14 +29,11 @@ make_gh_tensor <- function(dim, nquadgh) {
   }
 
   rule <- make_gh_1d(n)
-  nodes <- matrix(0, dim, total)
-  weights <- rep(1, total)
-  for (d in seq_len(dim)) {
-    indices <- rep(rep(seq_len(n), each = n^(dim - d)), times = n^(d - 1L))
-    nodes[d, ] <- rule$nodes[indices]
-    weights <- weights * rule$weights[indices]
+  tensor <- function(values) {
+    as.matrix(do.call(expand.grid, rep(list(values), dim)))[, dim:1L, drop = FALSE]
   }
-  list(nquad = as.integer(total), nodes = as.double(nodes), weights = weights)
+  list(nquad = as.integer(total), nodes = as.double(t(tensor(rule$nodes))),
+       weights = apply(tensor(rule$weights), 1L, prod))
 }
 
 make_qmc <- function(dim, nquadqmc) {
@@ -55,8 +47,4 @@ make_qmc <- function(dim, nquadqmc) {
   nodes <- matrix(qnorm(u), nrow = nquadqmc, ncol = dim)
   list(nquad = nquadqmc, nodes = as.double(t(nodes)),
        weights = rep(1 / nquadqmc, nquadqmc))
-}
-
-make_qmc_1d <- function(nquadqmc_re) {
-  make_qmc(1L, nquadqmc_re)
 }

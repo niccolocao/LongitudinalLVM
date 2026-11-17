@@ -31,10 +31,10 @@ cfa_long_fit_md(data, namvar, occ = "occ", ID = "ID", Q = NULL, simple = NULL, l
 \item{marker}{One marker item per factor, given as a name or index. Its loading is fixed to one.}
 \item{covariates, post_covariates}{Names of numeric predictors of the latent mean and their subset that enters the model after the first occasion.}
 \item{methInteg}{Integration method, one of \code{QMC}, \code{GH}, or \code{AGH}. QMC requires \pkg{spacefillr}.}
-\item{nquadqmc, nquadqmc_re}{Numbers of Sobol points for the main QMC rule and the optional one dimensional QMC rule for item intercepts.}
+\item{nquadqmc}{Number of Sobol points in the joint QMC rule.}
 \item{re_item}{Include a Gaussian subject by item random intercept.}
-\item{two_tier, two_tier_type}{Use an outer rule on the latent trajectory and inner item rules. For AGH, use node-specific adaptation or the full-equivalent block rule.}
-\item{re_tier}{Use GH or QMC for the inner rule when the outer rule uses QMC.}
+\item{two_tier, two_tier_type}{Use an outer rule on the latent trajectory and inner item rules for GH or AGH. For AGH, use node-specific adaptation or the full-equivalent block rule. Set \code{two_tier = FALSE} for QMC.}
+\item{nquadqmc_re, re_tier}{Arguments retained for compatibility. QMC uses one joint rule.}
 \item{theta_time}{Allow residual variances to vary over time.}
 \item{meas_invar}{Four indicators of invariance, in the order thresholds, intercepts, loadings, and residual variances. Time-specific thresholds, intercepts and loadings require the full-equivalent AGH rule.}
 \item{intercepts_free_items}{Items whose intercepts are freed after baseline in the full-equivalent model.}

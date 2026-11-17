@@ -20,7 +20,7 @@ static const R_CMethodDef methods[] = {
     {"loglik_growth_tt_agh_i_vec", (DL_FUNC) &loglik_growth_tt_agh_i_vec, 34, NULL},
     {"loglik_long_tt_agh_full_equiv_wu", (DL_FUNC) &loglik_long_tt_agh_full_equiv_wu, 27, NULL},
     {"loglik_growth_tt_agh_full_equiv", (DL_FUNC) &loglik_growth_tt_agh_full_equiv, 34, NULL},
-    {"loglik_growth_tt_agh_full_equiv_i_vec", (DL_FUNC) &loglik_growth_tt_agh_full_equiv_i_vec, 34, NULL},
+    {"loglik_growth_tt_agh_full_equiv_i_vec", (DL_FUNC) &loglik_growth_tt_agh_full_equiv_i_vec, 38, NULL},
     {"loglik_growth_re_tt_agh_nested", (DL_FUNC) &loglik_growth_re_tt_agh_nested, 37, NULL},
     {"loglik_growth_re_tt_agh_full_equiv", (DL_FUNC) &loglik_growth_re_tt_agh_full_equiv, 37, NULL},
     {"loglik_growth_re_tt_agh_full_equiv_score_q1", (DL_FUNC) &loglik_growth_re_tt_agh_full_equiv_score_q1, 39, NULL},

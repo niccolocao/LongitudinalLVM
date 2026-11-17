@@ -1,7 +1,7 @@
 Package: longProbitLVM
 Type: Package
 Title: Full Information Probit Models for Longitudinal Ordinal Data
-Version: 0.3.1
+Version: 0.4.0
 Authors@R: c(
     person("Niccolò", "Cao", role = "aut"),
     person("Lorenzo", "Carvisiglia", role = c("ctb", "cre"),
@@ -14,7 +14,7 @@ Description: Fits confirmatory factor and latent growth models for longitudinal
 License: GPL-3
 Encoding: UTF-8
 Depends: R (>= 4.0.0)
-Imports: stats, utils
+Imports: fastGHQuad, stats, utils
 Suggests: spacefillr
 NeedsCompilation: yes
 SystemRequirements: Fortran 2008

@@ -392,6 +392,9 @@ cfa_long_fit_md <- function(data,
   re_item <- check_flag(re_item, "re_item")
   two_tier <- check_flag(two_tier, "two_tier")
   methInteg  <- match.arg(methInteg)
+  if (methInteg == "QMC" && two_tier) {
+    stop("QMC requires two_tier = FALSE.", call. = FALSE)
+  }
   phi_struct <- match.arg(phi_struct, "FREE")
   two_tier_type <- match.arg(two_tier_type)
   re_tier <- match.arg(re_tier)
@@ -436,39 +439,18 @@ cfa_long_fit_md <- function(data,
     val
   }
 
-make_two_tier_nodes <- function(methInteg,
-                                dim_eta,
-                                re_item0,
-                                nquadqmc,
-                                nquadgh,
-                                re_tier = c("GH", "QMC"),
-                                nquadqmc_re = NULL) {
-
-  re_tier <- match.arg(re_tier)
-
-  if (is.null(nquadqmc_re)) {
-    nquadqmc_re <- nquadgh
+make_two_tier_nodes <- function(dim_eta, re_item0, nquadgh) {
+  if (dim_eta >= 9L) {
+    warning(
+      "griglia tensoriale su eta con dim_eta = ", dim_eta,
+      ": nquad_eta = nquadgh^dim_eta pu\u00f2 essere molto grande."
+    )
   }
 
-  if (methInteg %in% c("GH", "AGH")) {
-    if (dim_eta >= 9L) {
-      warning(
-        "griglia tensoriale su eta con dim_eta = ", dim_eta,
-        ": nquad_eta = nquadgh^dim_eta pu\u00f2 essere molto grande."
-      )
-    }
-
-    eta_rule <- make_gh_tensor(dim_eta, nquadgh)
-  } else {
-    eta_rule <- make_qmc(dim_eta, nquadqmc)
-  }
+  eta_rule <- make_gh_tensor(dim_eta, nquadgh)
 
   if (re_item0 == 1L) {
-    if (methInteg == "QMC" && re_tier == "QMC") {
-      re_rule <- make_qmc_1d(nquadqmc_re)
-    } else {
-      re_rule <- make_gh_1d(nquadgh)
-    }
+    re_rule <- make_gh_1d(nquadgh)
   } else {
     re_rule <- list(
       nquad = 1L,
@@ -801,15 +783,7 @@ if (!isTRUE(two_tier)) {
 
 } else {
 
-  quad_obj <- make_two_tier_nodes(
-  methInteg = methInteg,
-  dim_eta = dim_eta_int,
-  re_item0 = re_item0,
-  nquadqmc = nquadqmc,
-  nquadgh = nquadgh,
-  re_tier = re_tier,
-  nquadqmc_re = nquadqmc_re
-)
+  quad_obj <- make_two_tier_nodes(dim_eta_int, re_item0, nquadgh)
 
   nquad_eta0   <- quad_obj$nquad_eta0
   nodes_eta0   <- quad_obj$nodes_eta0

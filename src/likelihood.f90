@@ -8695,6 +8695,73 @@ DOUBLE PRECISION FUNCTION vrais_growth_tt()
 
 END FUNCTION vrais_growth_tt
 
+
+SUBROUTINE growth_joint_loglik(dimZ, joint_nodes, joint_weights, adaptive, refresh, modes, roots, logdet, loglik_i)
+  USE shared, ONLY: n, Q, nvar, nsub, nquad, nmes, re_item_flag, kappa, L_phi, sqrt_sigmak
+  USE datindiv, ONLY: nmescur
+  IMPLICIT NONE
+
+  INTEGER, INTENT(IN) :: dimZ
+  DOUBLE PRECISION, INTENT(IN) :: joint_nodes(dimZ,nquad), joint_weights(nquad)
+  LOGICAL, INTENT(IN) :: adaptive, refresh
+  DOUBLE PRECISION, INTENT(INOUT) :: modes(dimZ,*), roots(dimZ,dimZ,*), logdet(*)
+  DOUBLE PRECISION, INTENT(OUT) :: loglik_i(nsub)
+
+  INTEGER :: i, sm, l, k, dimEta
+  DOUBLE PRECISION :: z(dimZ), eta(n*Q), a, logp, term, max_term, sum_exp, logdet_eta
+  LOGICAL :: ok
+
+  dimEta = n * Q
+  loglik_i = -1.d9
+  nmescur = 0
+
+  DO i = 1, nsub
+     sm = SUM(nmes(i,:))
+     IF (sm == 0) THEN
+        loglik_i(i) = 0.d0
+        CYCLE
+     END IF
+     CALL activate_growth_subject(i)
+     IF (adaptive .AND. refresh) THEN
+        CALL find_mode_and_Btt_long(i, sm, dimZ, modes(:,i), z, roots(:,:,i), logdet(i), logdet_eta, ok)
+        IF (.NOT. ok) RETURN
+        modes(:,i) = z
+     END IF
+
+     max_term = -HUGE(1.d0)
+     sum_exp = 0.d0
+     DO l = 1, nquad
+        IF (joint_weights(l) <= 0.d0) CYCLE
+        z = joint_nodes(:,l)
+        term = LOG(joint_weights(l))
+        IF (adaptive) THEN
+           z = modes(:,i) + MATMUL(roots(:,:,i), joint_nodes(:,l))
+           term = term + logdet(i) + 0.5d0 * (SUM(joint_nodes(:,l)**2) - DOT_PRODUCT(z,z))
+        END IF
+        eta = kappa + MATMUL(L_phi, z(1:dimEta))
+        ok = .TRUE.
+        DO k = 1, nvar
+           IF (nmes(i,k) == 0) CYCLE
+           a = 0.d0
+           IF (re_item_flag == 1) a = sqrt_sigmak(k) * z(dimEta+k)
+           CALL item_logh_only_a_cond_eta(i, k, eta, a, logp, ok)
+           IF (.NOT. ok) EXIT
+           term = term + logp
+        END DO
+        IF (.NOT. ok .OR. term /= term) CYCLE
+        IF (term > max_term) THEN
+           sum_exp = sum_exp * EXP(max_term - term) + 1.d0
+           max_term = term
+        ELSE
+           sum_exp = sum_exp + EXP(term - max_term)
+        END IF
+     END DO
+     IF (sum_exp > 0.d0) loglik_i(i) = max_term + LOG(sum_exp)
+     nmescur = nmescur + sm
+  END DO
+END SUBROUTINE growth_joint_loglik
+
+
 !===========================================================
 ! Flexible identification/options for second-order latent growth
 ! ident0: 0=effects, 1=baseline_std, 2=mixed_marker, 3=marker
@@ -12933,6 +13000,7 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
                                 Q0, loadmask0,                        &
                             p_fix0, p_ran0, X0, Z0, delta_mask0,    &
                             delta_x_col0, delta_z_col0,              &
+                                joint_rule0, joint_modes0, joint_roots0, joint_logdet0, &
                                 loglik_i)                             &
         BIND(C, name="loglik_growth_tt_agh_full_equiv_i_vec")
 
@@ -12944,7 +13012,7 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
                   growth_n_lambda_par, growth_n_gamma_par, growth_n_beta_par,              &
                   growth_n_zeta_par, build_growth_eta_moments_design,                      &
                   build_agh_grid_full_equiv_tt,                                          &
-                  vrais_long_i_tt_agh_full_equiv_fixed
+                  vrais_long_i_tt_agh_full_equiv_fixed, growth_joint_loglik
   USE datindiv, ONLY: nmescur
   IMPLICIT NONE
 
@@ -12954,6 +13022,7 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
   INTEGER, INTENT(IN) :: re_item0, theta_time0
   INTEGER, INTENT(IN) :: delta_free0, monotone_tau0
   INTEGER, INTENT(IN) :: update_gh0, fit_id0
+  INTEGER, INTENT(IN) :: joint_rule0
   INTEGER, INTENT(IN) :: Q0
   INTEGER, INTENT(IN) :: p_fix0, p_ran0
   INTEGER, INTENT(IN) :: delta_x_col0, delta_z_col0
@@ -12970,6 +13039,7 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
   DOUBLE PRECISION, DIMENSION(nquad_re0),  INTENT(IN) :: nodes_re0
   DOUBLE PRECISION, DIMENSION(nquad_re0),  INTENT(IN) :: weights_re0
 
+  DOUBLE PRECISION, INTENT(INOUT) :: joint_modes0(*), joint_roots0(*), joint_logdet0(*)
   DOUBLE PRECISION, DIMENSION(nsub0), INTENT(OUT) :: loglik_i
 
   DOUBLE PRECISION, PARAMETER :: BAD_OBJ = 1.0D9
@@ -12980,7 +13050,7 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
   INTEGER :: n_lambda_free, n_gamma_free, n_Lu_est
   INTEGER :: nf, h
   DOUBLE PRECISION :: tmp_tau, tmp_i
-  INTEGER :: i, sm
+  INTEGER :: i, sm, dimJoint
   LOGICAL :: ok_i
   LOGICAL :: ok_grid
 
@@ -13018,23 +13088,25 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
   growth_delta_z_col = delta_z_col0
 
 
-  cache_key = IEOR(fit_id0, INT(Z'40000000'))
+  IF (joint_rule0 == 0) THEN
+    cache_key = IEOR(fit_id0, INT(Z'40000000'))
 
-  IF (cache_key /= agh_tt_fe_fit_id_cached) THEN
-     agh_tt_fe_grid_ready = .FALSE.
-     agh_tt_fe_fit_id_cached = cache_key
+    IF (cache_key /= agh_tt_fe_fit_id_cached) THEN
+       agh_tt_fe_grid_ready = .FALSE.
+       agh_tt_fe_fit_id_cached = cache_key
 
-     IF (ALLOCATED(agh_tt_fe_zeta_eta)) DEALLOCATE(agh_tt_fe_zeta_eta)
-     IF (ALLOCATED(agh_tt_fe_alpha)) DEALLOCATE(agh_tt_fe_alpha)
-     IF (ALLOCATED(agh_tt_fe_sdev)) DEALLOCATE(agh_tt_fe_sdev)
-     IF (ALLOCATED(agh_tt_fe_logconst)) DEALLOCATE(agh_tt_fe_logconst)
-     IF (ALLOCATED(agh_tt_fe_modes)) DEALLOCATE(agh_tt_fe_modes)
+       IF (ALLOCATED(agh_tt_fe_zeta_eta)) DEALLOCATE(agh_tt_fe_zeta_eta)
+       IF (ALLOCATED(agh_tt_fe_alpha)) DEALLOCATE(agh_tt_fe_alpha)
+       IF (ALLOCATED(agh_tt_fe_sdev)) DEALLOCATE(agh_tt_fe_sdev)
+       IF (ALLOCATED(agh_tt_fe_logconst)) DEALLOCATE(agh_tt_fe_logconst)
+       IF (ALLOCATED(agh_tt_fe_modes)) DEALLOCATE(agh_tt_fe_modes)
 
-     agh_tt_fe_dimEta_cached = -1
-     agh_tt_fe_nvar_cached = -1
-     agh_tt_fe_nquad_eta_cached = -1
-     agh_tt_fe_nquad_re_cached = -1
-     agh_tt_fe_nsub_cached = -1
+       agh_tt_fe_dimEta_cached = -1
+       agh_tt_fe_nvar_cached = -1
+       agh_tt_fe_nquad_eta_cached = -1
+       agh_tt_fe_nquad_re_cached = -1
+       agh_tt_fe_nsub_cached = -1
+    END IF
   END IF
 
   IF (ALLOCATED(lambda_long)) DEALLOCATE(lambda_long)
@@ -13045,8 +13117,10 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
 
   ALLOCATE(nmes(nsub,nvar), Y(nobs), nitem(nobs))
   ALLOCATE(c(nvar), cm1(nvar))
-  ALLOCATE(nodes(nquad*dimEta), weights(nquad))
-  ALLOCATE(nodes_re(nquad_re), weights_re(nquad_re), logweights_re(nquad_re))
+  IF (joint_rule0 == 0) THEN
+    ALLOCATE(nodes(nquad*dimEta), weights(nquad))
+    ALLOCATE(nodes_re(nquad_re), weights_re(nquad_re), logweights_re(nquad_re))
+  END IF
   ALLOCATE(loadmask(nvar,Q))
   ALLOCATE(lambda(nvar,Q), gamma(nvar))
   ALLOCATE(theta_k(nvar), invsd_k(nvar))
@@ -13076,19 +13150,21 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
   growth_delta_mask = RESHAPE(delta_mask0(1:growth_design_nsub*n*Q), &
                               (/ growth_design_nsub, n, Q /))
 
-  nodes(1:nquad*dimEta) = nodes_eta0(1:nquad*dimEta)
-  weights(1:nquad) = weights_eta0(1:nquad)
+  IF (joint_rule0 == 0) THEN
+    nodes(1:nquad*dimEta) = nodes_eta0(1:nquad*dimEta)
+    weights(1:nquad) = weights_eta0(1:nquad)
 
-  nodes_re(1:nquad_re) = nodes_re0(1:nquad_re)
-  weights_re(1:nquad_re) = weights_re0(1:nquad_re)
+    nodes_re(1:nquad_re) = nodes_re0(1:nquad_re)
+    weights_re(1:nquad_re) = weights_re0(1:nquad_re)
 
-  DO r = 1, nquad_re
-     IF (weights_re(r) > 0.d0) THEN
-        logweights_re(r) = LOG(weights_re(r))
-     ELSE
-        logweights_re(r) = -HUGE(1.d0)
-     END IF
-  END DO
+    DO r = 1, nquad_re
+       IF (weights_re(r) > 0.d0) THEN
+          logweights_re(r) = LOG(weights_re(r))
+       ELSE
+          logweights_re(r) = -HUGE(1.d0)
+       END IF
+    END DO
+  END IF
 
   CALL setup_load_indices_from_loadmask_growth(info)
   IF (info /= 0) GOTO 999
@@ -13193,6 +13269,13 @@ SUBROUTINE loglik_growth_tt_agh_full_equiv_i_vec(b0, Y0, nvar0, nsub0, nobs0, n0
 
   CALL build_growth_eta_moments_design(delta_g, Sigma_u, zeta_var, info)
   IF (info /= 0) GOTO 999
+
+  IF (joint_rule0 /= 0) THEN
+     dimJoint = dimEta + MERGE(nvar, 0, re_item_flag == 1)
+     CALL growth_joint_loglik(dimJoint, nodes_eta0, weights_eta0, joint_rule0 == 2, update_gh0 == 1, &
+                              joint_modes0, joint_roots0, joint_logdet0, loglik_i)
+     GOTO 999
+  END IF
 
   IF (update_gh0 == 1 .OR. .NOT. agh_tt_fe_grid_ready) THEN
      CALL build_agh_grid_full_equiv_tt(ok_grid)
