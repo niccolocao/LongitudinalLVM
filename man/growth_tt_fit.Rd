@@ -17,7 +17,7 @@ growth_tt_fit(data, namvar, occ = "occ", ID = "ID", loadmask = NULL, factor_name
     delta_mask = NULL, fixed_names = NULL, random_names = NULL, maxiter = 500,
     start = NULL, verbose = FALSE, compute_hessian = FALSE, hessian_method = NULL,
     hess_eps = 1e-04, profile = TRUE, profile_print = TRUE, parscale = NULL,
-    debug_par = TRUE, debug_par_each_eval = TRUE, debug_par_full = TRUE,
+    debug_par = FALSE, debug_par_each_eval = TRUE, debug_par_full = TRUE,
     debug_par_max_eval = Inf, tol_loglik = 1e-07, tol_par = 0.001, Q = NULL,
     simple = NULL, nquadgh_u = nquadgh, nquadgh_zeta = nquadgh, nquadgh_re = nquadgh,
     rho_pattern = NULL, two_tier = NULL)
@@ -34,7 +34,7 @@ growth_tt_fit_flexible(data, namvar, occ = "occ", ID = "ID", loadmask = NULL, fa
     delta_mask = NULL, fixed_names = NULL, random_names = NULL, maxiter = 500,
     start = NULL, verbose = FALSE, compute_hessian = FALSE, hessian_method = NULL,
     hess_eps = 1e-04, profile = TRUE, profile_print = TRUE, parscale = NULL,
-    debug_par = TRUE, debug_par_each_eval = TRUE, debug_par_full = TRUE,
+    debug_par = FALSE, debug_par_each_eval = TRUE, debug_par_full = TRUE,
     debug_par_max_eval = Inf, tol_loglik = 1e-07, tol_par = 0.001, Q = NULL,
     simple = NULL, nquadgh_u = nquadgh, nquadgh_zeta = nquadgh, nquadgh_re = nquadgh,
     rho_pattern = NULL, two_tier = NULL)
@@ -69,7 +69,7 @@ growth_tt_fit_flexible(data, namvar, occ = "occ", ID = "ID", loadmask = NULL, fa
 \item{maxiter, start, parscale}{Iteration budget, optional starting vector and parameter scaling. Use zero iterations to evaluate the likelihood at the starting values.}
 \item{compute_hessian, hessian_method, hess_eps}{Whether to compute the observed information, derivative method, and step for the analytic-score Hessian. Joint integration uses numerical derivatives.}
 \item{profile, profile_print, verbose}{Collect timings, print timings, and display optimization progress.}
-\item{debug_par, debug_par_each_eval, debug_par_full, debug_par_max_eval}{Controls for printing parameter diagnostics.}
+\item{debug_par, debug_par_each_eval, debug_par_full, debug_par_max_eval}{Set \code{debug_par = TRUE} to print parameter diagnostics. The other arguments control output at each evaluation, full parameter vectors, and the evaluation limit.}
 \item{tol_loglik, tol_par}{Relative convergence tolerances for the likelihood and coefficients.}
 }
 \details{

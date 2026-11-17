@@ -15,10 +15,14 @@ dat[dat$ID == 1L, items] <- NA
 dat <- dat[sample.int(nrow(dat)), ]
 
 for (method in c("AGH_FULL_EQUIV", "AGH_RE_FULL_EQUIV")) {
-  f <- growth_tt_fit(dat, items, methInteg = method, identification = "marker", marker_item = "a",
-                     nquadgh = 2L, maxiter = 3L, growth_shape = "rho", rho_fixed = 2,
-                     debug_par = FALSE, profile = FALSE)
-  stopifnot(is.finite(logLik(f)), isTRUE(f$structure$analytic_score))
+  progress <- capture.output({
+    f <- growth_tt_fit(dat, items, methInteg = method, identification = "marker", marker_item = "a",
+                       nquadgh = 2L, maxiter = 3L, growth_shape = "rho", rho_fixed = 2,
+                       verbose = TRUE, profile = FALSE)
+  })
+  stopifnot(is.finite(logLik(f)), isTRUE(f$structure$analytic_score),
+            any(grepl("using analytic fixed-grid score", progress, fixed = TRUE)),
+            !any(grepl("debug growth par", progress, fixed = TRUE)))
 }
 
 dat2 <- expand.grid(ID = 1:22, occ = 0:4)
