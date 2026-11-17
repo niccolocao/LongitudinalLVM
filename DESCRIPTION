@@ -1,0 +1,30 @@
+Package: longProbitLVM
+Type: Package
+Title: Full Information Probit Models for Longitudinal Ordinal Data
+Version: 0.3.1
+Authors@R: c(
+    person("Niccolò", "Cao", role = "aut"),
+    person("Lorenzo", "Carvisiglia", role = c("ctb", "cre"),
+           email = "131760713+lorenzocarvisiglia@users.noreply.github.com"))
+Description: Fits confirmatory factor and latent growth models for longitudinal
+    ordinal responses using the observed data likelihood. Supports Gaussian
+    item random intercepts, measurement invariance restrictions and numerical
+    integration by Gauss-Hermite quadrature, adaptive quadrature and
+    quasi-Monte Carlo.
+License: GPL-3
+Encoding: UTF-8
+Depends: R (>= 4.0.0)
+Imports: stats, utils
+Suggests: spacefillr
+NeedsCompilation: yes
+SystemRequirements: Fortran 2008
+Collate:
+    'data.R'
+    'native.R'
+    'quadrature.R'
+    'fit.R'
+    'cfa.R'
+    'wu2016.R'
+    'growth-rho.R'
+    'growthFun.R'
+    'growth-inference.R'
