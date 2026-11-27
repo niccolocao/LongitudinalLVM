@@ -7,8 +7,14 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
                     full_patterns = TRUE, compute_derivatives = TRUE,
                     compute_hessian = FALSE, start = NULL, maxiter = 500L,
                     reltol = 1e-10, diff_step = 1e-5,
-                    agh_maxiter = 100L, agh_tol = 1e-7) {
+                    agh_maxiter = 100L, agh_tol = 1e-7,
+                    verbose = FALSE) {
   methInteg <- match.arg(methInteg)
+  if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose))
+    stop("verbose must be TRUE or FALSE")
+  report <- function(...) {
+    if (verbose) message(...)
+  }
   check_count <- function(x, min = 1L) {
     if (length(x) != 1L || !is.finite(x) || x < min ||
         x != floor(x) || x > .Machine$integer.max)
@@ -398,24 +404,41 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   likelihood_data <- if (individual_agh) Y else obs_patterns
   likelihood_weights <- if (individual_agh) rep(1, N) else counts
   agh_mode_calls <- 0
+  objective_calls <- 0L
+  report("CFA ", methInteg, ": ", N, " subjects, ", K, " items, ",
+         Q, " factors, ", nrow(nodes), " quadrature nodes.")
+  if (individual_agh) report("AGH: adaptation performed separately for each subject.")
   objective <- function(par) {
+    objective_calls <<- objective_calls + 1L
     val <- tryCatch(-sum(likelihood_weights *
                           log_prob(par, likelihood_data, TRUE)),
                     error = function(e) Inf)
+    if (verbose && (objective_calls == 1L || objective_calls %% 10L == 0L)) {
+      report(sprintf("Likelihood evaluation %d: logLik = %s",
+                     objective_calls,
+                     if (is.finite(val)) format(-val, digits = 12) else "invalid"))
+    }
     if (!is.finite(val)) 1e100 else val
   }
+  report("Evaluating starting likelihood...")
   if (objective(par0) >= 1e100) stop("invalid starting likelihood")
+  report(if (maxiter == 0L) "Evaluation only (maxiter = 0)." else "Optimizing (BFGS)...")
   opt <- if (maxiter == 0L) {
     list(par = par0, value = objective(par0), convergence = NA_integer_,
          message = "likelihood evaluation only")
   } else {
     stats::optim(par0, objective, method = "BFGS",
-                 control = list(maxit = maxiter, reltol = reltol))
+                 control = list(maxit = maxiter, reltol = reltol,
+                                trace = if (verbose) 1L else 0L,
+                                REPORT = 1L))
   }
+  report("Optimization finished: convergence = ", opt$convergence,
+         ", likelihood evaluations = ", objective_calls, ".")
   theta <- to_natural(opt$par)
   decoded <- decode(theta)
   if (maxiter > 0L && opt$convergence != 0L)
     warning("optimization did not converge")
+  report("Evaluating final individual likelihood contributions...")
   mode_calls_before <- agh_mode_calls
   fitted_logpi <- log_prob(theta, likelihood_data)
   final_adaptations <- agh_mode_calls - mode_calls_before
@@ -455,6 +478,7 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   }
   pat <- pi_hat <- J <- U <- U_obs <- A <- A_obs <- H <- NULL
   if (isTRUE(full_patterns)) {
+    report("Computing complete-pattern probabilities...")
     if (sum(log(C)) > log(max_patterns) + 1e-12) {
       warning("full response-pattern enumeration skipped; max_patterns exceeded")
     } else {
@@ -464,10 +488,12 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     }
   }
   if (isTRUE(compute_derivatives)) {
+    report("Computing individual scores and information...")
     U_obs <- differentiate(function(t) log_prob(t, likelihood_data), theta)
     if (!individual_agh) U_obs <- U_obs[id, , drop = FALSE]
     A_obs <- crossprod(U_obs) / N
     if (!is.null(pat)) {
+      report("Computing pattern scores and probability Jacobian...")
       U <- differentiate(function(t) log_prob(t, pat), theta)
       J <- U * pi_hat
       A <- crossprod(U, U * pi_hat)
@@ -478,6 +504,7 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
       warning("information is numerically rank deficient; check identification")
   }
   if (isTRUE(compute_hessian)) {
+    report("Computing observed Hessian...")
     H <- tryCatch(stats::optimHess(theta, function(t) {
       -sum(likelihood_weights * log_prob(t, likelihood_data))
     }, control = list(ndeps = rep(diff_step, d))),
@@ -487,6 +514,7 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     })
     if (!is.null(H)) dimnames(H) <- list(par_names, par_names)
   }
+  report("Finished: logLik = ", format(sum(individual_loglik), digits = 12), ".")
   structure(list(coefficients = theta, loglik = sum(individual_loglik),
     individual_loglik = individual_loglik,
     convergence = opt$convergence, message = opt$message,
