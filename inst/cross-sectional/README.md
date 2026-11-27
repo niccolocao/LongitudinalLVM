@@ -76,11 +76,13 @@ parameters.
     fit_agh$loglik
 
 AGH locates the posterior mode of the standardized latent factor vector
-for each distinct observed response pattern. The negative posterior
+separately for every individual, including subjects with identical response
+patterns. No pattern-level caching is used during AGH estimation or observed
+score and Hessian evaluation. The negative posterior
 log-density Hessian determines the covariance of the adapted normal
 quadrature rule. The change of variables includes its Jacobian and the
 normal density ratio. Missing items are omitted from the conditional
-likelihood; entirely missing patterns have probability one.
+likelihood; entirely missing subjects have probability one and require no mode search.
 
 The mode and curvature are recomputed at every parameter evaluation,
 including numerical derivatives. The algorithm uses BFGS with an analytic
@@ -90,9 +92,21 @@ An unsuccessful adaptation is not silently replaced with standard GH.
 The outer optimizer rejects invalid likelihood evaluations.
 
 For a Q-dimensional latent vector, AGH uses nquadgh^Q nodes per
-response pattern. There is no fixed factor limit, but max_nodes applies
+individual with observed responses. There is no fixed factor limit, but max_nodes applies
 to both GH and AGH. Adaptation can reduce the required quadrature order,
-although the mode searches introduce overhead.
+although the mode searches introduce overhead. In particular, repeated
+response patterns are not aggregated for AGH, so fitting and numerical
+derivatives can be much slower than GH for large samples.
+
+    fit_agh$integration$adaptation
+    fit_agh$integration$final_adaptations
+    fit_agh$individual_loglik
+
+The final_adaptations counter records the number of mode searches in a
+single final observed-data likelihood evaluation. It equals the number
+of subjects with at least one observed item. Complete-pattern probability
+and Jacobian outputs are still evaluated separately on their requested
+pattern grid, not on the observed individuals.
 
 For validation, compare with a high-order GH reference at identical
 parameters before comparing optimized fits:
@@ -146,6 +160,7 @@ error must be assessed before using either integration rule for inference.
 | coefficients | Free parameters on the natural scale |
 | decode | Loading matrix, intercepts, latent means/covariance, thresholds and residual variances |
 | loglik | Maximized observed-data marginal log likelihood (if converged) |
+| individual_loglik | Observed-data log-likelihood contributions in input row order |
 | convergence | optim convergence code; zero indicates optimizer convergence |
 | patterns | Complete response patterns, zero-based categories |
 | probabilities | Model-implied probabilities for complete patterns |
@@ -159,11 +174,11 @@ error must be assessed before using either integration rule for inference.
 | observed_counts | Frequencies of the observed patterns |
 | probability_function | Evaluate probabilities at supplied natural parameters and patterns |
 | jacobian_function | Evaluate probability derivatives at supplied natural parameters and patterns |
-| integration | Integration method, dimension, base node count and adaptation indicator |
+| integration | Integration method, dimension, base node count, adaptation indicator and final adaptation count for AGH |
 
 The probability and derivative functions use the same integration method
 as estimation. GH and QMC reuse a fixed numerical rule; AGH recomputes
-the pattern-specific adaptation at each evaluation. Missing responses are marginalized under
+the individual-specific adaptation at each observed-data evaluation. Missing responses are marginalized under
 the observed-data likelihood and usual ignorability assumptions. Numeric
 items must have consecutive categories starting at 0 or 1, or be ordered
 factors. All declared categories must be observed for estimation. Patterns
