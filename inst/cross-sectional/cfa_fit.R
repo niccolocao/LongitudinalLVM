@@ -274,6 +274,7 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     vapply(seq_len(nrow(pat)), function(i) {
       obs <- which(!is.na(pat[i, ]))
       if (!length(obs)) return(0)
+      agh_mode_calls <<- agh_mode_calls + 1
       b <- B[obs, , drop = FALSE]
       a <- base[obs]
       lo0 <- vapply(obs, function(k) z$tau[[k]][pat[i, k] + 1L], numeric(1))
@@ -392,8 +393,14 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   obs_patterns <- Y[!duplicated(key), , drop = FALSE]
   id <- match(key, key[!duplicated(key)])
   counts <- tabulate(id, nrow(obs_patterns))
+  #AGH fits each subject separately, including repeated response patterns
+  individual_agh <- methInteg == "AGH"
+  likelihood_data <- if (individual_agh) Y else obs_patterns
+  likelihood_weights <- if (individual_agh) rep(1, N) else counts
+  agh_mode_calls <- 0
   objective <- function(par) {
-    val <- tryCatch(-sum(counts * log_prob(par, obs_patterns, TRUE)),
+    val <- tryCatch(-sum(likelihood_weights *
+                          log_prob(par, likelihood_data, TRUE)),
                     error = function(e) Inf)
     if (!is.finite(val)) 1e100 else val
   }
@@ -409,7 +416,11 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   decoded <- decode(theta)
   if (maxiter > 0L && opt$convergence != 0L)
     warning("optimization did not converge")
-  obs_logpi <- log_prob(theta, obs_patterns)
+  mode_calls_before <- agh_mode_calls
+  fitted_logpi <- log_prob(theta, likelihood_data)
+  final_adaptations <- agh_mode_calls - mode_calls_before
+  individual_loglik <- if (individual_agh) fitted_logpi else fitted_logpi[id]
+  obs_logpi <- if (individual_agh) fitted_logpi[!duplicated(key)] else fitted_logpi
 
   #derivatives on the natural parameter scale
   differentiate <- function(fun, x) {
@@ -453,8 +464,8 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     }
   }
   if (isTRUE(compute_derivatives)) {
-    U_obs <- differentiate(function(t) log_prob(t, obs_patterns), theta)
-    U_obs <- U_obs[id, , drop = FALSE]
+    U_obs <- differentiate(function(t) log_prob(t, likelihood_data), theta)
+    if (!individual_agh) U_obs <- U_obs[id, , drop = FALSE]
     A_obs <- crossprod(U_obs) / N
     if (!is.null(pat)) {
       U <- differentiate(function(t) log_prob(t, pat), theta)
@@ -468,7 +479,7 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   }
   if (isTRUE(compute_hessian)) {
     H <- tryCatch(stats::optimHess(theta, function(t) {
-      -sum(counts * log_prob(t, obs_patterns))
+      -sum(likelihood_weights * log_prob(t, likelihood_data))
     }, control = list(ndeps = rep(diff_step, d))),
     error = function(e) {
       warning("natural-scale Hessian failed: ", conditionMessage(e))
@@ -476,7 +487,8 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     })
     if (!is.null(H)) dimnames(H) <- list(par_names, par_names)
   }
-  structure(list(coefficients = theta, loglik = sum(counts * obs_logpi),
+  structure(list(coefficients = theta, loglik = sum(individual_loglik),
+    individual_loglik = individual_loglik,
     convergence = opt$convergence, message = opt$message,
     optimizer = opt, decode = decoded, nobs = N, npar = d,
     item_names = namvar, factor_names = factor_names, loadmask = loadmask,
@@ -490,6 +502,7 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     jacobian_function = jacobian_function,
     integration = list(method = methInteg, dimensions = Q, nodes = nrow(nodes),
                        adaptive = methInteg == "AGH",
-                       adaptation = if (methInteg == "AGH") "per response pattern" else NULL)),
+                       adaptation = if (individual_agh) "per individual" else NULL,
+                       final_adaptations = if (individual_agh) final_adaptations else NULL)),
     class = "cross_sectional_probit_cfa")
 }
