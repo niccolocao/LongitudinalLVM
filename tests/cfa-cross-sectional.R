@@ -122,7 +122,11 @@ fit_a <- cfa_fit(dat, Q = 1, nquadgh = 16, methInteg = "AGH",
 stopifnot(fit_a$convergence == 0L,
           abs(fit_a$loglik - fit$loglik) < 1e-3,
           max(abs(fit_a$coefficients - fit$coefficients)) < 5e-3,
-          max(abs(colMeans(fit_a$scores))) < 1e-3)
+          max(abs(colMeans(fit_a$scores))) < 1e-3,
+          fit_a$integration$update_gh == 10L,
+          all(fit_a$agh_trace$inner_maxit == 10L),
+          all(fit_a$agh_trace$mode_searches_inner == 0),
+          all(fit_a$agh_trace$mode_searches_refresh == N))
 err_a <- try(cfa_fit(dat2, simple = rep(1:2, each = 3),
                      nquadgh = 30, methInteg = "AGH",
                      max_nodes = 10, maxiter = 0), silent = TRUE)
@@ -166,9 +170,21 @@ for (method in c("GH", "AGH")) {
     }
   )
   stopifnot(any(grepl(paste("CFA", method), messages, fixed = TRUE)),
-            any(grepl("Likelihood evaluation 1", messages, fixed = TRUE)),
+            any(grepl("Evaluating starting likelihood", messages, fixed = TRUE)),
             any(grepl("Finished: logLik", messages, fixed = TRUE)),
             identical(quiet$coefficients, loud$coefficients),
             identical(quiet$loglik, loud$loglik),
             identical(quiet$probabilities, loud$probabilities))
 }
+
+
+#fast and full AGH use the same adaptive likelihood
+dat_check <- as.data.frame(f0$patterns)
+names(dat_check) <- names(dat)
+f_fast <- cfa_fit(dat_check, Q = 1, methInteg = "AGH", nquadgh = 20,
+                  update_gh = 10, start = theta, maxiter = 0)
+f_full <- cfa_fit(dat_check, Q = 1, methInteg = "AGH", nquadgh = 20,
+                  update_gh = 0, start = theta, maxiter = 0)
+stopifnot(abs(f_fast$loglik - f_full$loglik) < 1e-8,
+          max(abs(f_fast$scores - f_full$scores)) < 1e-6,
+          identical(f_full$integration$optimization, "full AGH"))
