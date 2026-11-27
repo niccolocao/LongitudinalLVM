@@ -399,10 +399,10 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     out
   }
 
-  log_prob <- function(theta, pat, internal = FALSE) {
+  log_prob <- function(theta, pat, internal = FALSE, previous = NULL) {
     z <- decode(theta, internal)
     if (methInteg == "AGH")
-      return(log_prob_agh_fixed(z, pat, build_agh_grid(z, pat)))
+      return(log_prob_agh_fixed(z, pat, build_agh_grid(z, pat, previous)))
     eta <- sweep(nodes %*% z$R, 2L, z$mu, "+")
     m <- sweep(eta %*% t(z$lambda), 2L, z$nu, "+")
     if (any(!is.finite(m))) stop("nonfinite linear predictors")
@@ -497,11 +497,14 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
       report("AGH outer ", outer, ": fixed grid, maxit = ", inner_maxit,
              ", logLik = ", format(-value, digits = 12))
       fixed_grid <- final_grid
+      mode_before_inner <- agh_mode_calls
       opt_inner <- stats::optim(best, function(par) objective(par, fixed_grid),
                                 method = "BFGS", control = control_bfgs(inner_maxit))
       best <- opt_inner$par
       val_fixed <- objective(best, fixed_grid)
       if (val_fixed >= 1e100) stop("AGH fixed-grid optimization failed")
+      mode_searches_inner <- agh_mode_calls - mode_before_inner
+      mode_before_refresh <- agh_mode_calls
       report("Updating individual AGH grids...")
       final_grid <- build_agh_grid(decode(best, TRUE), likelihood_data, fixed_grid)
       value <- objective(best, final_grid)
@@ -514,7 +517,9 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
         cumulative_maxit = budget, negloglik_grid_start = prev_value,
         negloglik_fixed_end = val_fixed, negloglik_refreshed = value,
         loglik_refreshed = -value, convergence = opt_inner$convergence,
-        relative_loglik = rel_ll, relative_par = rel_par))
+        relative_loglik = rel_ll, relative_par = rel_par,
+        mode_searches_inner = mode_searches_inner,
+        mode_searches_refresh = agh_mode_calls - mode_before_refresh))
       report("AGH outer ", outer, ": refreshed logLik = ",
              format(-value, digits = 12), ", relative logLik change = ",
              format(rel_ll, digits = 4), ", relative parameter change = ",
@@ -590,7 +595,8 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   }
   if (isTRUE(compute_derivatives)) {
     report("Computing individual scores and information...")
-    U_obs <- differentiate(function(t) log_prob(t, likelihood_data), theta)
+    U_obs <- differentiate(function(t) log_prob(t, likelihood_data,
+                                                  previous = final_grid), theta)
     if (!individual_agh) U_obs <- U_obs[id, , drop = FALSE]
     A_obs <- crossprod(U_obs) / N
     if (!is.null(pat)) {
@@ -607,7 +613,8 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   if (isTRUE(compute_hessian)) {
     report("Computing observed Hessian...")
     H <- tryCatch(stats::optimHess(theta, function(t) {
-      -sum(likelihood_weights * log_prob(t, likelihood_data))
+      -sum(likelihood_weights * log_prob(t, likelihood_data,
+                                         previous = final_grid))
     }, control = list(ndeps = rep(diff_step, d))),
     error = function(e) {
       warning("natural-scale Hessian failed: ", conditionMessage(e))
