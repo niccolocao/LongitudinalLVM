@@ -1,12 +1,13 @@
 #cross-sectional ordinal probit CFA
 cfa_fit <- function(data, namvar = names(data), Q = NULL,
                     simple = NULL, loadmask = NULL, marker_item = NULL,
-                    factor_names = NULL, methInteg = c("GH", "QMC"),
+                    factor_names = NULL, methInteg = c("GH", "AGH", "QMC"),
                     nquadgh = 30L, nquadqmc = 16384L,
                     max_nodes = 200000L, max_patterns = 4096L,
                     full_patterns = TRUE, compute_derivatives = TRUE,
                     compute_hessian = FALSE, start = NULL, maxiter = 500L,
-                    reltol = 1e-10, diff_step = 1e-5) {
+                    reltol = 1e-10, diff_step = 1e-5,
+                    agh_maxiter = 100L, agh_tol = 1e-7) {
   methInteg <- match.arg(methInteg)
   check_count <- function(x, min = 1L) {
     if (length(x) != 1L || !is.finite(x) || x < min ||
@@ -19,6 +20,9 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   max_nodes <- check_count(max_nodes)
   max_patterns <- check_count(max_patterns)
   maxiter <- check_count(maxiter, 0L)
+  agh_maxiter <- check_count(agh_maxiter)
+  if (length(agh_tol) != 1L || !is.finite(agh_tol) || agh_tol <= 0)
+    stop("invalid AGH tolerance")
   if (!is.finite(diff_step) || diff_step <= 0 ||
       !is.finite(reltol) || reltol <= 0) stop("invalid tolerance")
   data <- as.data.frame(data)
@@ -213,10 +217,10 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   }
   par0 <- to_internal(start)
 
-  #fixed integration rule
-  if (methInteg == "GH") {
+  #base integration rule
+  if (methInteg %in% c("GH", "AGH")) {
     if (Q * log(nquadgh) > log(max_nodes))
-      stop("GH exceeds max_nodes; reduce nquadgh or select QMC")
+      stop("GH/AGH exceeds max_nodes; reduce nquadgh or select QMC")
     rule <- fastGHQuad::gaussHermiteData(nquadgh)
     grid <- as.matrix(expand.grid(rep(list(seq_len(nquadgh)), Q)))
     nodes <- matrix(sqrt(2) * rule$x[grid], nrow(grid), Q)
@@ -247,8 +251,111 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     }
     pat
   }
+  #stable ordinal category log probability
+  category_logprob <- function(lo, hi) {
+    if (all(lo == -Inf)) return(stats::pnorm(hi, log.p = TRUE))
+    if (all(hi == Inf))
+      return(stats::pnorm(lo, lower.tail = FALSE, log.p = TRUE))
+    pos <- lo > 0
+    out <- numeric(length(lo))
+    out[!pos] <- logdiff(stats::pnorm(hi[!pos], log.p = TRUE),
+                         stats::pnorm(lo[!pos], log.p = TRUE))
+    out[pos] <- logdiff(stats::pnorm(lo[pos], lower.tail = FALSE, log.p = TRUE),
+                        stats::pnorm(hi[pos], lower.tail = FALSE, log.p = TRUE))
+    out
+  }
+
+  #adaptive quadrature in standard normal factor coordinates
+  log_prob_agh <- function(z, pat) {
+    base <- z$nu + drop(z$lambda %*% z$mu)
+    B <- z$lambda %*% t(z$R)
+    node_norm <- rowSums(nodes^2) / 2
+    Iq <- diag(Q)
+    vapply(seq_len(nrow(pat)), function(i) {
+      obs <- which(!is.na(pat[i, ]))
+      if (!length(obs)) return(0)
+      b <- B[obs, , drop = FALSE]
+      a <- base[obs]
+      lo0 <- vapply(obs, function(k) z$tau[[k]][pat[i, k] + 1L], numeric(1))
+      hi0 <- vapply(obs, function(k) z$tau[[k]][pat[i, k] + 2L], numeric(1))
+
+      posterior <- function(x, deriv = FALSE) {
+        m <- a + drop(b %*% x)
+        lo <- lo0 - m
+        hi <- hi0 - m
+        lp <- vapply(seq_along(obs), function(j)
+          category_logprob(lo[j], hi[j]), numeric(1))
+        value <- sum(x^2) / 2 - sum(lp)
+        if (!deriv) return(value)
+        if (!is.finite(value)) stop("nonfinite AGH posterior")
+        rl <- exp(stats::dnorm(lo, log = TRUE) - lp)
+        rh <- exp(stats::dnorm(hi, log = TRUE) - lp)
+        g <- rl - rh
+        grad <- x - drop(crossprod(b, g))
+        #curvature of the negative conditional log probability
+        zl <- zh <- numeric(length(obs))
+        jl <- is.finite(lo); jh <- is.finite(hi)
+        zl[jl] <- lo[jl] * rl[jl]
+        zh[jh] <- hi[jh] * rh[jh]
+        curv <- g^2 - zl + zh
+        H <- Iq + crossprod(b, b * curv)
+        list(value = value, gradient = grad, hessian = H)
+      }
+
+      fn <- function(x) posterior(x)
+      gr <- function(x) posterior(x, TRUE)$gradient
+      #deterministic mode search and Newton refinement
+      mode_fit <- stats::optim(rep(0, Q), fn, gr, method = "BFGS",
+        control = list(maxit = agh_maxiter, reltol = 1e-13))
+      mode <- mode_fit$par
+      for (iter in seq_len(10L)) {
+        p <- posterior(mode, TRUE)
+        if (max(abs(p$gradient)) <= agh_tol * (1 + max(abs(mode)))) break
+        direction <- tryCatch(solve(p$hessian, p$gradient),
+                              error = function(e) NULL)
+        if (is.null(direction) || any(!is.finite(direction))) break
+        step <- 1
+        accepted <- FALSE
+        for (j in seq_len(20L)) {
+          trial <- mode - step * direction
+          ftrial <- fn(trial)
+          if (is.finite(ftrial) && ftrial <= p$value + 1e-13 * (1 + abs(p$value))) {
+            mode <- trial
+            accepted <- TRUE
+            break
+          }
+          step <- step / 2
+        }
+        if (!accepted) break
+      }
+      p <- posterior(mode, TRUE)
+      if (any(!is.finite(p$gradient)) ||
+          max(abs(p$gradient)) > agh_tol * (1 + max(abs(mode))))
+        stop("AGH posterior mode did not converge")
+      H <- (p$hessian + t(p$hessian)) / 2
+      R <- tryCatch(chol(H), error = function(e) NULL)
+      if (is.null(R)) {
+        H <- stats::optimHess(mode, fn, gr,
+                              control = list(ndeps = rep(1e-5, Q)))
+        R <- chol((H + t(H)) / 2)
+      }
+      #if H = R'R, A'A = H^{-1} for A = R^{-T}
+      A <- t(backsolve(R, Iq))
+      adapted <- sweep(nodes %*% A, 2L, mode, "+")
+      m <- sweep(adapted %*% t(b), 2L, a, "+")
+      log_cond <- numeric(nrow(nodes))
+      for (j in seq_along(obs)) {
+        log_cond <- log_cond +
+          category_logprob(lo0[j] - m[, j], hi0[j] - m[, j])
+      }
+      logsumexp(logw + log_cond - rowSums(adapted^2) / 2 +
+                  node_norm) - sum(log(diag(R)))
+    }, numeric(1))
+  }
+
   log_prob <- function(theta, pat, internal = FALSE) {
     z <- decode(theta, internal)
+    if (methInteg == "AGH") return(log_prob_agh(z, pat))
     eta <- sweep(nodes %*% z$R, 2L, z$mu, "+")
     m <- sweep(eta %*% t(z$lambda), 2L, z$nu, "+")
     if (any(!is.finite(m))) stop("nonfinite linear predictors")
@@ -381,6 +488,8 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     observed_pattern_id = id, observed_probabilities = exp(obs_logpi),
     probability_function = probability_function,
     jacobian_function = jacobian_function,
-    integration = list(method = methInteg, dimensions = Q, nodes = nrow(nodes))),
+    integration = list(method = methInteg, dimensions = Q, nodes = nrow(nodes),
+                       adaptive = methInteg == "AGH",
+                       adaptation = if (methInteg == "AGH") "per response pattern" else NULL)),
     class = "cross_sectional_probit_cfa")
 }
