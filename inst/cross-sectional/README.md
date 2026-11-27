@@ -65,6 +65,50 @@ lambda[y2,F1], ..., nu[y2], ..., mu[F1], phi[F1,F1].
 For ordinal items, additional threshold parameters follow the covariance
 parameters.
 
+## Adaptive Gauss-Hermite quadrature (AGH)
+
+    fit_agh <- cfa_fit(dat, Q = 1, marker_item = "y1",
+                       methInteg = "AGH", nquadgh = 12,
+                       compute_hessian = TRUE)
+
+    fit_agh$integration
+    fit_agh$convergence
+    fit_agh$loglik
+
+AGH locates the posterior mode of the standardized latent factor vector
+for each distinct observed response pattern. The negative posterior
+log-density Hessian determines the covariance of the adapted normal
+quadrature rule. The change of variables includes its Jacobian and the
+normal density ratio. Missing items are omitted from the conditional
+likelihood; entirely missing patterns have probability one.
+
+The mode and curvature are recomputed at every parameter evaluation,
+including numerical derivatives. The algorithm uses BFGS with an analytic
+posterior gradient and Newton refinement. The controls agh_maxiter and
+agh_tol set the mode-search iteration budget and gradient tolerance.
+An unsuccessful adaptation is not silently replaced with standard GH.
+The outer optimizer rejects invalid likelihood evaluations.
+
+For a Q-dimensional latent vector, AGH uses nquadgh^Q nodes per
+response pattern. There is no fixed factor limit, but max_nodes applies
+to both GH and AGH. Adaptation can reduce the required quadrature order,
+although the mode searches introduce overhead.
+
+For validation, compare with a high-order GH reference at identical
+parameters before comparing optimized fits:
+
+    ref <- cfa_fit(dat, start = fit_agh$coefficients, maxiter = 0,
+                   methInteg = "GH", nquadgh = 50)
+    max(abs(ref$probabilities - fit_agh$probabilities))
+    ref$loglik - fit_agh$loglik
+    max(abs(ref$scores - fit_agh$scores))
+
+Unlike a common fixed quadrature grid, pattern-specific AGH rules
+need not produce complete-pattern probabilities summing exactly to one
+at finite quadrature order. The probabilities are not renormalized;
+increase nquadgh and verify normalization, derivatives and likelihood
+stability before using them for goodness-of-fit inference.
+
 ## Multiple factors
 
     fit2 <- cfa_fit(dat2, Q = 2,
@@ -115,10 +159,11 @@ error must be assessed before using either integration rule for inference.
 | observed_counts | Frequencies of the observed patterns |
 | probability_function | Evaluate probabilities at supplied natural parameters and patterns |
 | jacobian_function | Evaluate probability derivatives at supplied natural parameters and patterns |
-| integration | Integration method, dimension and node count |
+| integration | Integration method, dimension, base node count and adaptation indicator |
 
-The probability and derivative functions use the same fixed numerical
-integration rule as estimation. Missing responses are marginalized under
+The probability and derivative functions use the same integration method
+as estimation. GH and QMC reuse a fixed numerical rule; AGH recomputes
+the pattern-specific adaptation at each evaluation. Missing responses are marginalized under
 the observed-data likelihood and usual ignorability assumptions. Numeric
 items must have consecutive categories starting at 0 or 1, or be ordered
 factors. All declared categories must be observed for estimation. Patterns
