@@ -8,7 +8,8 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
                     compute_hessian = FALSE, start = NULL, maxiter = 500L,
                     reltol = 1e-10, diff_step = 1e-5,
                     agh_maxiter = 100L, agh_tol = 1e-7,
-                    verbose = FALSE) {
+                    verbose = FALSE, update_gh = 10L,
+                    tol_loglik = 1e-7, tol_par = 1e-3) {
   methInteg <- match.arg(methInteg)
   if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose))
     stop("verbose must be TRUE or FALSE")
@@ -27,6 +28,10 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   max_patterns <- check_count(max_patterns)
   maxiter <- check_count(maxiter, 0L)
   agh_maxiter <- check_count(agh_maxiter)
+  update_gh <- check_count(update_gh, 0L)
+  if (length(tol_loglik) != 1L || !is.finite(tol_loglik) || tol_loglik <= 0 ||
+      length(tol_par) != 1L || !is.finite(tol_par) || tol_par <= 0)
+    stop("invalid AGH convergence tolerances")
   if (length(agh_tol) != 1L || !is.finite(agh_tol) || agh_tol <= 0)
     stop("invalid AGH tolerance")
   if (!is.finite(diff_step) || diff_step <= 0 ||
@@ -272,14 +277,26 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   }
 
   #adaptive quadrature in standard normal factor coordinates
-  log_prob_agh <- function(z, pat) {
+  build_agh_grid <- function(z, pat, previous = NULL) {
     base <- z$nu + drop(z$lambda %*% z$mu)
     B <- z$lambda %*% t(z$R)
     node_norm <- rowSums(nodes^2) / 2
     Iq <- diag(Q)
-    vapply(seq_len(nrow(pat)), function(i) {
+    G <- nrow(nodes)
+    n <- nrow(pat)
+    if (as.double(G) * n * (Q + 3) > 5e7)
+      stop("AGH individual grid too large; reduce quadrature order")
+    grid <- matrix(0, G * n, Q)
+    correction <- matrix(0, G, n)
+    modes <- matrix(0, n, Q)
+    for (i in seq_len(n)) {
       obs <- which(!is.na(pat[i, ]))
-      if (!length(obs)) return(0)
+      ii <- (i - 1L) * G + seq_len(G)
+      if (!length(obs)) {
+        grid[ii, ] <- nodes
+        correction[, i] <- logw
+        next
+      }
       agh_mode_calls <<- agh_mode_calls + 1
       b <- B[obs, , drop = FALSE]
       a <- base[obs]
@@ -312,7 +329,8 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
       fn <- function(x) posterior(x)
       gr <- function(x) posterior(x, TRUE)$gradient
       #deterministic mode search and Newton refinement
-      mode_fit <- stats::optim(rep(0, Q), fn, gr, method = "BFGS",
+      mode_start <- if (is.null(previous)) rep(0, Q) else previous$modes[i, ]
+      mode_fit <- stats::optim(mode_start, fn, gr, method = "BFGS",
         control = list(maxit = agh_maxiter, reltol = 1e-13))
       mode <- mode_fit$par
       for (iter in seq_len(10L)) {
@@ -349,20 +367,42 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
       #if H = R'R, A'A = H^{-1} for A = R^{-T}
       A <- t(backsolve(R, Iq))
       adapted <- sweep(nodes %*% A, 2L, mode, "+")
-      m <- sweep(adapted %*% t(b), 2L, a, "+")
-      log_cond <- numeric(nrow(nodes))
-      for (j in seq_along(obs)) {
-        log_cond <- log_cond +
-          category_logprob(lo0[j] - m[, j], hi0[j] - m[, j])
+      grid[ii, ] <- adapted
+      modes[i, ] <- mode
+      correction[, i] <- logw - rowSums(adapted^2) / 2 +
+        node_norm - sum(log(diag(R)))
+    }
+    list(z = grid, log_weights = correction, modes = modes)
+  }
+
+  #fixed standardized individual grid, as in longitudinal AGH
+  log_prob_agh_fixed <- function(z, pat, grid) {
+    G <- nrow(nodes)
+    n <- nrow(pat)
+    lp <- grid$log_weights
+    base <- z$nu + drop(z$lambda %*% z$mu)
+    B <- z$lambda %*% t(z$R)
+    for (k in seq_len(K)) {
+      m <- matrix(drop(grid$z %*% B[k, ]) + base[k], G, n)
+      for (j in seq_len(C[k])) {
+        idx <- which(!is.na(pat[, k]) & pat[, k] == j - 1L)
+        if (!length(idx)) next
+        v <- m[, idx, drop = FALSE]
+        lp[, idx] <- lp[, idx, drop = FALSE] +
+          matrix(category_logprob(z$tau[[k]][j] - as.vector(v),
+                                  z$tau[[k]][j + 1L] - as.vector(v)),
+                 G, length(idx))
       }
-      logsumexp(logw + log_cond - rowSums(adapted^2) / 2 +
-                  node_norm) - sum(log(diag(R)))
-    }, numeric(1))
+    }
+    out <- apply(lp, 2L, logsumexp)
+    out[rowSums(!is.na(pat)) == 0L] <- 0
+    out
   }
 
   log_prob <- function(theta, pat, internal = FALSE) {
     z <- decode(theta, internal)
-    if (methInteg == "AGH") return(log_prob_agh(z, pat))
+    if (methInteg == "AGH")
+      return(log_prob_agh_fixed(z, pat, build_agh_grid(z, pat)))
     eta <- sweep(nodes %*% z$R, 2L, z$mu, "+")
     m <- sweep(eta %*% t(z$lambda), 2L, z$nu, "+")
     if (any(!is.finite(m))) stop("nonfinite linear predictors")
@@ -405,32 +445,90 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   likelihood_weights <- if (individual_agh) rep(1, N) else counts
   agh_mode_calls <- 0
   objective_calls <- 0L
+  agh_trace <- NULL
+  final_grid <- NULL
   report("CFA ", methInteg, ": ", N, " subjects, ", K, " items, ",
          Q, " factors, ", nrow(nodes), " quadrature nodes.")
-  if (individual_agh) report("AGH: adaptation performed separately for each subject.")
-  objective <- function(par) {
+  if (individual_agh)
+    report("AGH: individual adaptation; update_gh = ", update_gh, ".")
+  objective <- function(par, grid = NULL) {
     objective_calls <<- objective_calls + 1L
-    val <- tryCatch(-sum(likelihood_weights *
-                          log_prob(par, likelihood_data, TRUE)),
-                    error = function(e) Inf)
-    if (verbose && (objective_calls == 1L || objective_calls %% 10L == 0L)) {
-      report(sprintf("Likelihood evaluation %d: logLik = %s",
-                     objective_calls,
-                     if (is.finite(val)) format(-val, digits = 12) else "invalid"))
-    }
+    val <- tryCatch({
+      lp <- if (is.null(grid)) log_prob(par, likelihood_data, TRUE) else
+        log_prob_agh_fixed(decode(par, TRUE), likelihood_data, grid)
+      -sum(likelihood_weights * lp)
+    }, error = function(e) Inf)
     if (!is.finite(val)) 1e100 else val
   }
+  control_bfgs <- function(niter) {
+    list(maxit = niter, reltol = reltol,
+         trace = if (verbose) 1L else 0L, REPORT = 10L)
+  }
+  fast_agh <- individual_agh && update_gh > 0L
   report("Evaluating starting likelihood...")
-  if (objective(par0) >= 1e100) stop("invalid starting likelihood")
-  report(if (maxiter == 0L) "Evaluation only (maxiter = 0)." else "Optimizing (BFGS)...")
-  opt <- if (maxiter == 0L) {
-    list(par = par0, value = objective(par0), convergence = NA_integer_,
-         message = "likelihood evaluation only")
+  if (fast_agh) {
+    final_grid <- build_agh_grid(decode(par0, TRUE), likelihood_data)
+    initial <- objective(par0, final_grid)
   } else {
-    stats::optim(par0, objective, method = "BFGS",
-                 control = list(maxit = maxiter, reltol = reltol,
-                                trace = if (verbose) 1L else 0L,
-                                REPORT = 1L))
+    initial <- objective(par0)
+  }
+  if (initial >= 1e100) stop("invalid starting likelihood")
+
+  if (maxiter == 0L) {
+    opt <- list(par = par0, value = initial, convergence = NA_integer_,
+                message = "likelihood evaluation only")
+  } else if (!fast_agh) {
+    report("Optimizing (BFGS)...")
+    opt <- stats::optim(par0, objective, method = "BFGS",
+                        control = control_bfgs(maxiter))
+  } else {
+    report("Fast AGH: outer-inner optimization with fixed individual grids.")
+    best <- par0
+    value <- initial
+    budget <- 0L
+    outer <- 0L
+    converged <- FALSE
+    agh_trace <- data.frame()
+    while (budget < maxiter) {
+      outer <- outer + 1L
+      inner_maxit <- min(update_gh, maxiter - budget)
+      prev_best <- best
+      prev_value <- value
+      report("AGH outer ", outer, ": fixed grid, maxit = ", inner_maxit,
+             ", logLik = ", format(-value, digits = 12))
+      fixed_grid <- final_grid
+      opt_inner <- stats::optim(best, function(par) objective(par, fixed_grid),
+                                method = "BFGS", control = control_bfgs(inner_maxit))
+      best <- opt_inner$par
+      val_fixed <- objective(best, fixed_grid)
+      if (val_fixed >= 1e100) stop("AGH fixed-grid optimization failed")
+      report("Updating individual AGH grids...")
+      final_grid <- build_agh_grid(decode(best, TRUE), likelihood_data, fixed_grid)
+      value <- objective(best, final_grid)
+      if (value >= 1e100) stop("AGH grid refresh failed")
+      budget <- budget + inner_maxit
+      rel_ll <- abs(value - prev_value) / max(1, abs(value), abs(prev_value))
+      rel_par <- max(abs(best - prev_best) / pmax(1, abs(best), abs(prev_best)))
+      agh_trace <- rbind(agh_trace, data.frame(
+        outer = outer, inner_maxit = inner_maxit,
+        cumulative_maxit = budget, negloglik_grid_start = prev_value,
+        negloglik_fixed_end = val_fixed, negloglik_refreshed = value,
+        loglik_refreshed = -value, convergence = opt_inner$convergence,
+        relative_loglik = rel_ll, relative_par = rel_par))
+      report("AGH outer ", outer, ": refreshed logLik = ",
+             format(-value, digits = 12), ", relative logLik change = ",
+             format(rel_ll, digits = 4), ", relative parameter change = ",
+             format(rel_par, digits = 4))
+      if (rel_ll < tol_loglik && rel_par < tol_par) {
+        converged <- TRUE
+        break
+      }
+    }
+    opt <- list(par = best, value = value,
+                convergence = if (converged) 0L else 1L,
+                message = if (converged) "AGH outer-inner optimization converged"
+                          else "AGH outer-inner optimization reached maximum iterations",
+                counts = c("function" = objective_calls, "gradient" = NA_integer_))
   }
   report("Optimization finished: convergence = ", opt$convergence,
          ", likelihood evaluations = ", objective_calls, ".")
@@ -440,7 +538,10 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     warning("optimization did not converge")
   report("Evaluating final individual likelihood contributions...")
   mode_calls_before <- agh_mode_calls
-  fitted_logpi <- log_prob(theta, likelihood_data)
+  fitted_logpi <- if (fast_agh) {
+    final_grid <- build_agh_grid(decoded, likelihood_data, final_grid)
+    log_prob_agh_fixed(decoded, likelihood_data, final_grid)
+  } else log_prob(theta, likelihood_data)
   final_adaptations <- agh_mode_calls - mode_calls_before
   individual_loglik <- if (individual_agh) fitted_logpi else fitted_logpi[id]
   obs_logpi <- if (individual_agh) fitted_logpi[!duplicated(key)] else fitted_logpi
@@ -518,7 +619,7 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
   structure(list(coefficients = theta, loglik = sum(individual_loglik),
     individual_loglik = individual_loglik,
     convergence = opt$convergence, message = opt$message,
-    optimizer = opt, decode = decoded, nobs = N, npar = d,
+    optimizer = opt, agh_trace = agh_trace, decode = decoded, nobs = N, npar = d,
     item_names = namvar, factor_names = factor_names, loadmask = loadmask,
     marker_item = namvar[marker], levels = levels_item,
     patterns = pat, probabilities = pi_hat, jacobian = J,
@@ -531,6 +632,9 @@ cfa_fit <- function(data, namvar = names(data), Q = NULL,
     integration = list(method = methInteg, dimensions = Q, nodes = nrow(nodes),
                        adaptive = methInteg == "AGH",
                        adaptation = if (individual_agh) "per individual" else NULL,
-                       final_adaptations = if (individual_agh) final_adaptations else NULL)),
+                       final_adaptations = if (individual_agh) final_adaptations else NULL,
+                       update_gh = if (individual_agh) update_gh else NULL,
+                       optimization = if (fast_agh) "outer-inner fixed grid"
+                                      else if (individual_agh) "full AGH" else "standard")),
     class = "cross_sectional_probit_cfa")
 }
