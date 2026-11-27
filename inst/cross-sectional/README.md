@@ -14,6 +14,25 @@ It can also be sourced directly from this directory.
 No change to NAMESPACE or DESCRIPTION is required. The function is not
 an exported package function; call cfa_fit() after sourcing the file.
 
+## Verbose progress
+
+Set verbose = TRUE to display the method, sample dimensions, number of
+quadrature nodes, starting likelihood, every tenth objective evaluation
+(and the first), BFGS iteration trace, convergence code and the
+post-estimation calculations. This is available for GH, AGH and QMC.
+The default verbose = FALSE preserves silent fitting.
+
+    fit <- cfa_fit(dat, Q = 1, methInteg = "GH",
+                   nquadgh = 50, verbose = TRUE)
+
+    fit_agh <- cfa_fit(dat, Q = 1, methInteg = "AGH",
+                       nquadgh = 20, verbose = TRUE)
+
+Objective evaluations include numerical-gradient evaluations and are not
+the same as optimizer iterations. AGH progress is reported for the outer
+optimization, not every individual posterior mode search. Verbose output
+does not alter the likelihood or optimization settings.
+
 ## Model
 
 For subject i and item k,
