@@ -17,9 +17,9 @@ an exported package function; call cfa_fit() after sourcing the file.
 ## Verbose progress
 
 Set verbose = TRUE to display the method, sample dimensions, number of
-quadrature nodes, starting likelihood, every tenth objective evaluation
-(and the first), BFGS iteration trace, convergence code and the
-post-estimation calculations. This is available for GH, AGH and QMC.
+quadrature nodes, starting likelihood, BFGS progress every ten optimizer
+iterations (REPORT = 10), convergence code and post-estimation
+calculations. Initial, final and AGH outer-cycle messages are also shown. This is available for GH, AGH and QMC.
 The default verbose = FALSE preserves silent fitting.
 
     fit <- cfa_fit(dat, Q = 1, methInteg = "GH",
@@ -103,12 +103,41 @@ quadrature rule. The change of variables includes its Jacobian and the
 normal density ratio. Missing items are omitted from the conditional
 likelihood; entirely missing subjects have probability one and require no mode search.
 
-The mode and curvature are recomputed at every parameter evaluation,
-including numerical derivatives. The algorithm uses BFGS with an analytic
-posterior gradient and Newton refinement. The controls agh_maxiter and
-agh_tol set the mode-search iteration budget and gradient tolerance.
-An unsuccessful adaptation is not silently replaced with standard GH.
-The outer optimizer rejects invalid likelihood evaluations.
+By default, update_gh = 10 selects the fast outer-inner AGH algorithm
+based on the longitudinal functions. At the beginning, an adaptive grid
+is constructed for each individual in standardized latent coordinates.
+The inner BFGS optimization keeps these nodes and importance corrections
+fixed for a block of at most ten iterations, including numerical gradient
+evaluations. The outer step refreshes all individual grids, warm-starting
+the mode search at the previous individual mode. Convergence requires
+relative changes of both the refreshed likelihood and parameters below
+tol_loglik (1e-7) and tol_par (1e-3). Blocks have constant length, unlike
+the increasing inner budgets in the original longitudinal functions.
+
+Set update_gh = 0 for full AGH, which refreshes the grid at every objective
+evaluation. Final observed-data likelihood, numerical scores, Jacobian
+and optional Hessian use refreshed adaptive quadrature. The numerical
+derivatives can still be expensive. The implementation is in R with
+vectorized fixed-grid likelihood evaluation, not the longitudinal
+compiled Fortran routines.
+
+The mode algorithm uses BFGS with an analytic posterior gradient and
+Newton refinement. The controls agh_maxiter and agh_tol set the
+mode-search iteration budget and gradient tolerance. An unsuccessful
+adaptation is not silently replaced with standard GH.
+
+    fit_agh <- cfa_fit(dat, Q = 1, marker_item = "y1",
+                       methInteg = "AGH", nquadgh = 20,
+                       update_gh = 10, verbose = TRUE)
+
+    fit_agh$agh_trace
+    fit_agh$integration$update_gh
+
+The trace records inner iteration budgets, fixed and refreshed
+likelihoods, convergence measures and actual individual mode searches.
+The inner mode-search count must be zero; the refresh count equals the
+number of individuals with observed responses. Early BFGS convergence
+can end an inner block before its maximum iteration budget.
 
 For a Q-dimensional latent vector, AGH uses nquadgh^Q nodes per
 individual with observed responses. There is no fixed factor limit, but max_nodes applies
