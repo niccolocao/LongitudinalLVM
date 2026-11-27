@@ -127,3 +127,23 @@ err_a <- try(cfa_fit(dat2, simple = rep(1:2, each = 3),
                      nquadgh = 30, methInteg = "AGH",
                      max_nodes = 10, maxiter = 0), silent = TRUE)
 stopifnot(inherits(err_a, "try-error"))
+
+
+#individual adaptation with repeated patterns and missing responses
+dat_ind <- as.data.frame(rbind(f0$patterns, f0$patterns,
+                              rep(NA_integer_, ncol(dat))))
+names(dat_ind) <- names(dat)
+f_ind <- suppressWarnings(cfa_fit(dat_ind, Q = 1, methInteg = "AGH",
+                                 nquadgh = 20, start = theta, maxiter = 0))
+L <- nrow(f0$patterns)
+stopifnot(identical(f_ind$integration$adaptation, "per individual"),
+          f_ind$integration$final_adaptations == 2L * L,
+          nrow(f_ind$observed_patterns) == L + 1L,
+          length(f_ind$individual_loglik) == 2L * L + 1L,
+          abs(sum(f_ind$individual_loglik) - f_ind$loglik) < 1e-12,
+          max(abs(f_ind$individual_loglik[seq_len(L)] -
+                    f_ind$individual_loglik[L + seq_len(L)])) < 1e-12,
+          max(abs(f_ind$scores[seq_len(L), ] -
+                    f_ind$scores[L + seq_len(L), ])) < 1e-10,
+          f_ind$individual_loglik[2L * L + 1L] == 0,
+          all(f_ind$scores[2L * L + 1L, ] == 0))
