@@ -85,3 +85,45 @@ err <- try(cfa_fit(dat2, simple = rep(1:2, each = 3),
                    nquadgh = 30, max_nodes = 10, maxiter = 0),
            silent = TRUE)
 stopifnot(inherits(err, "try-error"))
+
+
+#adaptive GH at identical natural parameters
+fa <- cfa_fit(dat, Q = 1, nquadgh = 20, methInteg = "AGH",
+              start = theta, maxiter = 0)
+stopifnot(fa$integration$adaptive,
+          fa$integration$nodes == 20L,
+          abs(sum(fa$probabilities) - 1) < 1e-7,
+          max(abs(fa$probabilities - p_ref)) < 1e-7,
+          abs(fa$loglik - f0$loglik) < 1e-4,
+          max(abs(fa$jacobian - f0$jacobian)) < 1e-6,
+          max(abs(fa$scores - f0$scores)) < 1e-5)
+
+fa2 <- cfa_fit(dat2, simple = rep(1:2, each = 3),
+               nquadgh = 20, methInteg = "AGH",
+               start = theta2, maxiter = 0)
+stopifnot(fa2$integration$nodes == 400L,
+          max(abs(fa2$probabilities - f2$probabilities)) < 1e-6,
+          max(abs(fa2$jacobian - f2$jacobian)) < 1e-5,
+          abs(sum(fa2$probabilities) - 1) < 1e-6)
+
+fa3 <- cfa_fit(dat3, Q = 1, nquadgh = 20, methInteg = "AGH",
+               start = theta3, maxiter = 0)
+stopifnot(max(abs(fa3$probabilities - f3$probabilities)) < 1e-7,
+          max(abs(fa3$scores - f3$scores)) < 1e-5)
+p_marg_a <- fa3$probability_function(fa3$coefficients, pat)[1]
+stopifnot(abs(p_marg_a - p_marg) < 1e-7)
+missing_pat <- matrix(NA_real_, 1L, ncol(dat3))
+stopifnot(fa3$probability_function(fa3$coefficients, missing_pat) == 1,
+          max(abs(fa3$jacobian_function(fa3$coefficients, missing_pat))) == 0)
+
+#AGH optimization and resource guard
+fit_a <- cfa_fit(dat, Q = 1, nquadgh = 16, methInteg = "AGH",
+                 start = fit$coefficients, maxiter = 100)
+stopifnot(fit_a$convergence == 0L,
+          abs(fit_a$loglik - fit$loglik) < 1e-3,
+          max(abs(fit_a$coefficients - fit$coefficients)) < 5e-3,
+          max(abs(colMeans(fit_a$scores))) < 1e-3)
+err_a <- try(cfa_fit(dat2, simple = rep(1:2, each = 3),
+                     nquadgh = 30, methInteg = "AGH",
+                     max_nodes = 10, maxiter = 0), silent = TRUE)
+stopifnot(inherits(err_a, "try-error"))
