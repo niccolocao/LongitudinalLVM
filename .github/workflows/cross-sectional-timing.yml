@@ -1,4 +1,4 @@
-name: Cross-sectional CFA timing
+name: Cross-sectional CFA timing (AGH 3 nodes)
 on:
   push:
     branches: [cross-sectional-cfa]
@@ -44,7 +44,7 @@ jobs:
               tm <- system.time({
                 fit <- cfa_fit(dat, Q = 1, marker_item = "y1",
                                methInteg = method,
-                               nquadgh = if (method == "GH") 50 else 20,
+                               nquadgh = if (method == "GH") 50 else 3,
                                update_gh = 10, compute_derivatives = derivatives,
                                compute_hessian = FALSE, verbose = FALSE)
               })
