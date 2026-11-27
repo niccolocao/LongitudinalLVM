@@ -147,3 +147,28 @@ stopifnot(identical(f_ind$integration$adaptation, "per individual"),
                     f_ind$scores[L + seq_len(L), ])) < 1e-10,
           f_ind$individual_loglik[2L * L + 1L] == 0,
           all(f_ind$scores[2L * L + 1L, ] == 0))
+
+
+#verbose progress does not change estimates
+for (method in c("GH", "AGH")) {
+  dat_v <- as.data.frame(f0$patterns)
+  names(dat_v) <- names(dat)
+  quiet <- cfa_fit(dat_v, Q = 1, methInteg = method, nquadgh = 12,
+                   start = theta, maxiter = 0, compute_derivatives = FALSE)
+  messages <- character()
+  loud <- withCallingHandlers(
+    cfa_fit(dat_v, Q = 1, methInteg = method, nquadgh = 12,
+            start = theta, maxiter = 0, compute_derivatives = FALSE,
+            verbose = TRUE),
+    message = function(m) {
+      messages <<- c(messages, conditionMessage(m))
+      invokeRestart("muffleMessage")
+    }
+  )
+  stopifnot(any(grepl(paste("CFA", method), messages, fixed = TRUE)),
+            any(grepl("Likelihood evaluation 1", messages, fixed = TRUE)),
+            any(grepl("Finished: logLik", messages, fixed = TRUE)),
+            identical(quiet$coefficients, loud$coefficients),
+            identical(quiet$loglik, loud$loglik),
+            identical(quiet$probabilities, loud$probabilities))
+}
