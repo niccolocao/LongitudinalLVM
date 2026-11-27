@@ -1,0 +1,63 @@
+name: Cross-sectional CFA timing
+on:
+  push:
+    branches: [cross-sectional-cfa]
+    paths: ['.github/workflows/cross-sectional-timing.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: Install quadrature dependency
+        run: Rscript -e 'install.packages("fastGHQuad")'
+      - name: Benchmark the five-item CFA
+        shell: Rscript {0}
+        run: |
+          source("inst/cross-sectional/cfa_fit.R")
+          set.seed(123)
+          N <- 2000
+          K <- 5
+          lambda <- c(1, 0.8, 1.2, 0.9, 1.1)
+          nu <- c(0, 0.3, -0.3, 0.2, -0.2)
+          mu <- 0.3
+          phi <- 1.2
+          eta <- rnorm(N, mu, sqrt(phi))
+          Ystar <- matrix(0, N, K)
+          for (k in 1:K) {
+            Ystar[, k] <- nu[k] + lambda[k] * eta + rnorm(N)
+          }
+          dat <- as.data.frame(1 * (Ystar > 0))
+          names(dat) <- paste0("y", 1:K)
+          cat("R version:", R.version.string, "\n")
+          cat("CPU:", system("grep -m1 'model name' /proc/cpuinfo", intern = TRUE), "\n")
+          out <- list()
+          for (method in c("GH", "AGH")) {
+            for (derivatives in c(FALSE, TRUE)) {
+              gc()
+              tm <- system.time({
+                fit <- cfa_fit(dat, Q = 1, marker_item = "y1",
+                               methInteg = method,
+                               nquadgh = if (method == "GH") 50 else 20,
+                               update_gh = 10, compute_derivatives = derivatives,
+                               compute_hessian = FALSE, verbose = FALSE)
+              })
+              cat(sprintf("BENCHMARK method=%s derivatives=%s elapsed=%.3f user=%.3f convergence=%s logLik=%.10f\n",
+                          method, derivatives, tm[["elapsed"]], tm[["user.self"]],
+                          fit$convergence, fit$loglik))
+              if (derivatives) {
+                out[[method]] <- fit
+                cat("Score mean maximum:", max(abs(colMeans(fit$scores))), "\n")
+                if (method == "AGH") print(fit$agh_trace)
+              }
+            }
+          }
+          cat("Maximum coefficient difference:", max(abs(out$GH$coefficients - out$AGH$coefficients)), "\n")
+          cat("Log likelihood difference:", out$GH$loglik - out$AGH$loglik, "\n")
+          stopifnot(out$GH$convergence == 0L, out$AGH$convergence == 0L)
